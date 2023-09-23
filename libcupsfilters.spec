@@ -22,6 +22,10 @@ BuildRequires: pkgconfig(libjpeg)
 BuildRequires: pkgconfig(fontconfig)
 BuildRequires: pkgconfig(cups)
 BuildRequires: pkgconfig(libexif)
+BuildRequires: autoconf
+BuildRequires: automake
+BuildRequires: libtool
+BuildRequires: make
 
 %description
 CUPS is a standards-based, open-source printing system.
