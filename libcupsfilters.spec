@@ -27,6 +27,8 @@ BuildRequires: automake
 BuildRequires: libtool
 BuildRequires: make
 BuildRequires: gettext-devel
+BuildRequires: (ghostscript or ghostpdl)
+Requires: (ghostscript or ghostpdl)
 
 %description
 CUPS is a standards-based, open-source printing system.
