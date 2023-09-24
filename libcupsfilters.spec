@@ -26,6 +26,7 @@ BuildRequires: autoconf
 BuildRequires: automake
 BuildRequires: libtool
 BuildRequires: make
+BuildRequires: gettext-devel
 
 %description
 CUPS is a standards-based, open-source printing system.
