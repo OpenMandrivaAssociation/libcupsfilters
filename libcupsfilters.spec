@@ -3,8 +3,8 @@
 %define devname %mklibname cupsfilters -d
 
 Name: libcupsfilters
-Version: 2.0.0
-Release: 3
+Version: 2.1.0
+Release: 1
 Source0: https://github.com/OpenPrinting/libcupsfilters/archive/%{version}/%{name}-%{version}.tar.gz
 Summary: Library containing functions useful for developing printer drivers
 URL: https://github.com/OpenPrinting/libcupsfilters
