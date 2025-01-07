@@ -4,7 +4,7 @@
 
 Name: libcupsfilters
 Version: 2.1.0
-Release: 1
+Release: 2
 Source0: https://github.com/OpenPrinting/libcupsfilters/archive/%{version}/%{name}-%{version}.tar.gz
 Summary: Library containing functions useful for developing printer drivers
 URL: https://github.com/OpenPrinting/libcupsfilters
