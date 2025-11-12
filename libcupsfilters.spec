@@ -3,8 +3,8 @@
 %define devname %mklibname cupsfilters -d
 
 Name: libcupsfilters
-Version: 2.1.0
-Release: 2
+Version: 2.1.1
+Release: 1
 Source0: https://github.com/OpenPrinting/libcupsfilters/archive/%{version}/%{name}-%{version}.tar.gz
 Summary: Library containing functions useful for developing printer drivers
 URL: https://github.com/OpenPrinting/libcupsfilters
@@ -31,6 +31,9 @@ BuildRequires: mupdf
 BuildRequires: (ghostscript or ghostpdl)
 Requires: (ghostscript or ghostpdl)
 Requires: mupdf
+
+%patchlist
+https://github.com/OpenPrinting/libcupsfilters/commit/b69dfacec7f17628178.patch
 
 %description
 CUPS is a standards-based, open-source printing system.
