@@ -1,0 +1,31 @@
+From b7419a0b91b61fafa5c6133d3b103b4666b3283d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?G=C3=BCnther=20Noack?= <gnoack3000@gmail.com>
+Date: Thu, 10 Jul 2025 09:54:51 +0200
+Subject: [PATCH 11/33] pdftoraster: Check result of render_page (#95)
+
+render_page() may return NULL if the page is not properly constructed.
+---
+ cupsfilters/pdftoraster.cxx | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
+index 40e16e36..1c035997 100644
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
+@@ -1578,6 +1578,13 @@ out_page(pdftoraster_doc_t *doc,
+     return (0);
+ 
+   poppler::page *current_page =doc->poppler_doc->create_page(pageNo - 1);
++  if (!current_page)
++  {
++    if (log)
++      log(ld, CF_LOGLEVEL_ERROR,
++	  "cfFilterPDFToRaster: Cannot create page %d", pageNo);
++    return (1);
++  }
+   poppler::page_box_enum box = poppler::page_box_enum::crop_box;
+   poppler::rectf inputPageBox = current_page->page_rect(box);
+   poppler::page::orientation_enum orient = current_page->orientation();
+-- 
+2.53.0
+

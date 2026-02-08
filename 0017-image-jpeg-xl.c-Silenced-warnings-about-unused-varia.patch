@@ -1,0 +1,34 @@
+From 9616127abcfdf1242eed0116e4d6c192e2c3607f Mon Sep 17 00:00:00 2001
+From: Till Kamppeter <till.kamppeter@gmail.com>
+Date: Wed, 1 Oct 2025 15:33:03 +0200
+Subject: [PATCH 17/33] image-jpeg-xl.c: Silenced warnings about unused
+ variables
+
+---
+ cupsfilters/image-jpeg-xl.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/cupsfilters/image-jpeg-xl.c b/cupsfilters/image-jpeg-xl.c
+index 2cc4e889..1001cb90 100644
+--- a/cupsfilters/image-jpeg-xl.c
++++ b/cupsfilters/image-jpeg-xl.c
+@@ -69,7 +69,6 @@ _cfImageReadJPEGXL( cf_image_t      *img,
+   JxlDecoderStatus status;
+   uint8_t *jxl_data = NULL;
+   long jxl_size;
+-  int ok = 0;
+   size_t bytes_read;
+ 
+   //
+@@ -157,7 +156,7 @@ _cfImageReadJPEGXL( cf_image_t      *img,
+   
+ #ifdef HAVE_EXIF
+   fseek(fp, 0, SEEK_SET);
+-  int temp = _cfImageReadEXIF(img, fp);    // Handle resolution from EXIF if needed
++  //int temp = _cfImageReadEXIF(img, fp);    // Handle resolution from EXIF if needed
+ #endif
+ 
+   //
+-- 
+2.53.0
+

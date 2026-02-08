@@ -1,0 +1,2611 @@
+From 6e91ac49fddeb3779422caa80b7a885da0226ede Mon Sep 17 00:00:00 2001
+From: uddhav Phatak <uddhavabhijeet@gmail.com>
+Date: Fri, 16 Jan 2026 16:02:47 +0530
+Subject: [PATCH 28/33] add documentation comments
+
+---
+ cupsfilters/pclmtoraster.c | 334 ++++++++------
+ cupsfilters/pdf.c          |  84 ++--
+ cupsfilters/pdf.h          |   2 +-
+ cupsfilters/pdftoraster.c  | 908 +++++++++++++++++++++++--------------
+ cupsfilters/pwgtopdf.c     |  50 +-
+ 5 files changed, 833 insertions(+), 545 deletions(-)
+
+diff --git a/cupsfilters/pclmtoraster.c b/cupsfilters/pclmtoraster.c
+index b5f74ba5..6cfcc041 100644
+--- a/cupsfilters/pclmtoraster.c
++++ b/cupsfilters/pclmtoraster.c
+@@ -2,7 +2,7 @@
+ // PCLm/Raster-only PDF to Raster filter function for libcupsfilters.
+ //
+ // Copyright © 2020 by Vikrant Malik
+-// Copyright 2024-2025 Uddhav Phatak <uddhavphatak@gmail.com>
++// Copyright 2024-2026 Uddhav Phatak <uddhavphatak@gmail.com>
+ //
+ // Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ // information.
+@@ -28,26 +28,33 @@
+ 
+ #define MAX_BYTES_PER_PIXEL 32
+ 
+-typedef struct pclmtoraster_data_s {
+-  int outformat;
+-  int numcolors;
+-  int rowsize;
+-  cups_page_header_t header;
+-  char pageSizeRequested[64];
+-  int bi_level;
++// Structure to hold filter data and state
++typedef struct pclmtoraster_data_s 
++{
++  int outformat;		// Output Format
++  int numcolors;		// number of Colour components(e.g. 3 for RGB, 4 for CYMK..)
++  int rowsize;			// size of a row
++  cups_page_header_t header;	// CUPS page header
++  char pageSizeRequested[64];	// Requested page size name
++  int bi_level;			// flag for printing
+   // image swapping
+   int swap_image_x;
+   int swap_image_y;
++  // margin swapping 
+   int swap_margin_x;
+   int swap_margin_y;
+-  unsigned int nplanes;
+-  unsigned int nbands;
+-  unsigned int bytesPerLine;
+-  char colorspace[32]; // Use fixed-size string
++  unsigned int nplanes;		// Number of colour planes
++  unsigned int nbands;		// Number of colour bands
++  unsigned int bytesPerLine;	// bytes per line in output
++  char colorspace[32]; 		// Colourspace string(Use fixed-size string)
+ } pclmtoraster_data_t;
+ 
+-void 
+-init_pclmtoraster_data_t(pclmtoraster_data_t *data)
++//
++// 'init_pclmtoraster_data_t()' - initialize the data structure with default values.
++//
++
++void 							  // O - void output
++init_pclmtoraster_data_t(pclmtoraster_data_t *data)	// I - pclm data to initialize
+ {
+   data->outformat = CF_FILTER_OUT_FORMAT_PWG_RASTER;
+   data->numcolors = 0;
+@@ -64,12 +71,14 @@ init_pclmtoraster_data_t(pclmtoraster_data_t *data)
+   strncpy(data->colorspace, "\0", sizeof(data->colorspace));
+ }
+ 
++// function pointer for color space conversion
+ typedef unsigned char *(*convert_cspace_func)(unsigned char *src,
+ 	       			 	 unsigned char *dst,
+ 					 unsigned int row,
+ 					 unsigned int pixels,
+ 					 pclmtoraster_data_t *data);
+ 
++// function pointer for line processing (handling planes/bands)
+ typedef unsigned char *(*convert_line_func)(unsigned char *src,
+ 	       			       unsigned char *dst,
+ 				       unsigned char *buf,
+@@ -78,16 +87,22 @@ typedef unsigned char *(*convert_line_func)(unsigned char *src,
+ 				       pclmtoraster_data_t *data,
+ 				       convert_cspace_func convertcspace);
+ 
++// grouping the selected conversion functions
+ typedef struct pclm_conversion_function_s
+ {
+   convert_cspace_func convertcspace;// Function for conversion of colorspaces
+   convert_line_func convertline;    // Function tom modify raster data of a line
+ } pclm_conversion_function_t;
+ 
+-static int
+-parse_opts(cf_filter_data_t *data,
+-	   cf_filter_out_format_t outformat,
+-	   pclmtoraster_data_t *pclmtoraster_data)
++
++//
++// 'parse_opts()' - Parse filter options and initialize headers
++//
++
++static int						  // O - 1 if successful
++parse_opts(cf_filter_data_t *data,			// I - Job and Print data	
++	   cf_filter_out_format_t outformat,		// I - output format
++	   pclmtoraster_data_t *pclmtoraster_data)	// I - Raster Data
+ {
+   int			num_options = 0;
+   cups_option_t*	options = NULL;
+@@ -106,6 +121,7 @@ parse_opts(cf_filter_data_t *data,
+ 
+   num_options = cfJoinJobOptionsAndAttrs(data, num_options, &options);
+ 
++  // Check for media-class option to determine if PWG raster is forced
+   t = cupsGetOption("media-class", num_options, options);
+   if (t == NULL)
+     t = cupsGetOption("MediaClass", num_options, options);
+@@ -115,8 +131,10 @@ parse_opts(cf_filter_data_t *data,
+       pclmtoraster_data->outformat = CF_FILTER_OUT_FORMAT_PWG_RASTER;
+   }
+ 
++  // Prep the raster header on the basis of options
+   cfRasterPrepareHeader(header, data, outformat, outformat, 0, &cspace);
+ 
++  // handle the Duplex and Tumble logic to set swapping flags
+   if(header->Duplex)
+   {
+     int backside;
+@@ -138,6 +156,7 @@ parse_opts(cf_filter_data_t *data,
+ 			FM_NO));
+       backside &= 7;
+ 
++      // determine transformation requirements on the basis of backside orientation
+       if(backside == CF_BACKSIDE_MANUAL_TUMBLE && header->Tumble)
+       {
+ 	pclmtoraster_data->swap_image_x = true;
+@@ -173,6 +192,7 @@ parse_opts(cf_filter_data_t *data,
+     }
+   }
+ 
++  // check for bi-level printing mode
+   if ((val = cupsGetOption("print-color-mode", num_options, options)) != NULL &&
+ 		  	   !strncasecmp(val, "bi-level", 8))
+     pclmtoraster_data->bi_level = 1;
+@@ -185,9 +205,13 @@ parse_opts(cf_filter_data_t *data,
+   return 0;
+ }
+ 
+-static bool
+-media_box_lookup(pdfio_obj_t *object,
+-	       	 float rect[4])
++//
++// 'media_box_lookup()' - Helper function look up MediaBox from PDF dictionary
++//
++
++static bool					  // O - 1 if mediabox is found, 0 if not
++media_box_lookup(pdfio_obj_t *object,		// I - Page Object to look for mediabox
++	       	 float rect[4])			// O - rectangle for mediabox output
+ {
+   pdfio_rect_t mediaBox;
+   pdfio_dict_t *object_dict = pdfioObjGetDict(object);
+@@ -209,7 +233,7 @@ media_box_lookup(pdfio_obj_t *object,
+ //                     (assumed that bits-per-component of the bitmap is 8).
+ //
+ 
+-static unsigned char *		     // O - Output Bitmap
++static unsigned char *		       // O - Output Bitmap
+ rotate_bitmap(unsigned char *src,    // I - Input string
+ 	      unsigned char *dst,    // O - Destination string
+ 	      unsigned int rotate,   // I - Rotate value (0, 90, 180, 270)
+@@ -227,9 +251,11 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+   if(rotate == 0)
+     return (src);
+   else if(rotate == 180)
+-  {
++  {	
++    // rotate page 180 degree
+     if (strcmp(colorspace, "/DeviceGray") == 0)
+     {
++      // 1 byte per pixel(because output is b&w & 1 colour is used)
+       bp = src + height * rowsize - 1;
+       dp = dst;
+       for (unsigned int h = 0; h < height; h++)
+@@ -238,6 +264,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }  
+     else if (strcmp(colorspace, "/DeviceCMYK") == 0)
+     {
++      // 4 bytes per pixel(because output is colour & 4 colours are used)
+       bp = src + height * rowsize - 4;
+       dp = dst;
+       for (unsigned int h = 0; h < height; h ++)
+@@ -253,6 +280,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }
+     else if (strcmp(colorspace, "/DeviceRGB") == 0)
+     {
++      // 3 bytes per pixel(because output is colour & 3 colours are used)
+       bp = src + height * rowsize - 3;
+       dp = dst;
+       for (unsigned int h = 0; h < height; h ++)
+@@ -268,8 +296,10 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+   }
+   else if (rotate == 270)
+   {
++    // Rotate 270 degrees (Counter-clockwise)
+     if (strcmp(colorspace, "/DeviceGray") == 0)
+     {
++      // 1 byte per pixel(because output is b&w & 1 colour is used)
+       bp = src;
+       dp = dst;
+       for (unsigned int h = 0; h < height; h ++)
+@@ -281,6 +311,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }
+     else if (strcmp(colorspace, "/DeviceCMYK") == 0)
+     {
++      // 4 bytes per pixel(because output is colour & 4 colours are used)
+       for (unsigned int h = 0; h < height; h++)
+       {
+         bp = src + (height - h) * 4 - 4;
+@@ -295,6 +326,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }
+     else if (strcmp(colorspace, "/DeviceRGB") == 0)
+     {
++      // 3 bytes per pixel(because output is colour & 3 colours are used)
+       bp = src;
+       dp = dst;
+       for (unsigned int h = 0; h < height; h ++)
+@@ -311,8 +343,10 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+   }
+   else if (rotate == 90)
+   {
++    // Rotate 90 degrees (Clockwise)
+     if (strcmp(colorspace, "/DeviceGray") == 0)
+     {
++      // 1 byte per pixel(because output is b&w & 1 colour is used)
+       for (unsigned int h = 0; h < height; h ++)
+       {
+         bp = src + (width - 1) * height + h;
+@@ -322,6 +356,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }
+     else if (strcmp(colorspace, "/DeviceCMYK") == 0)
+     {
++      // 4 bytes per pixel(because output is colour & 4 colours are used)
+       for (unsigned int h = 0; h < height; h ++)
+       {
+         bp = src + (width - 1) * height * 4 + 4 * h;
+@@ -336,6 +371,7 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+     }
+     else if (strcmp(colorspace, "/DeviceRGB") == 0)
+     {
++      // 3 bytes per pixel(because output is colour & 3 colours are used)
+       for (unsigned int h = 0; h < height; h ++)
+       {
+ 	bp = src + (width - 1) * height * 3 + 3 * h;
+@@ -359,49 +395,55 @@ rotate_bitmap(unsigned char *src,    // I - Input string
+   return (temp);
+ }
+ 
+-static unsigned char *
+-rgb_to_rgbw_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++// 
++// Color space conversion functions below, 
++//
++// This converts a line of pixels from the source color space 
++// to the destination
++//
++
++static unsigned char*				  // O - output path
++rgb_to_rgbw_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageRGBToCMYK(src, dst, pixels);
++  // Invert CMYK to get RGBW-like behavior (often needed for specific raster modes)
+   for (unsigned int i = 0; i < 4 * pixels; i ++)
+     dst[i] = ~dst[i];
+   return (dst);
+ }
+ 
+-static unsigned char *
+-rgb_to_cmyk_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++static unsigned char*				  // O - output Path
++rgb_to_cmyk_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageRGBToCMYK(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-rgb_to_cmy_line(unsigned char *src,
+-		unsigned char *dst,
+-		unsigned int row,
+-		unsigned int pixels,
+-		pclmtoraster_data_t *data)
++static unsigned char*				  // O - output Path
++rgb_to_cmy_line(unsigned char *src,		// I - source path
++		unsigned char *dst,		// I - output path(output of func)
++		unsigned int row,		// I - row value
++		unsigned int pixels,		// I - number of pixels
++		pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageRGBToCMY(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-rgb_to_white_line(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int row,
+-		  unsigned int pixels,
+-		  pclmtoraster_data_t *data)
++static unsigned char*				  // O - output Path
++rgb_to_white_line(unsigned char *src,		// I - source path
++		  unsigned char *dst,		// I - output path(output of func)
++		  unsigned int row,		// I - row value
++		  unsigned int pixels,		// I - number of pixels
++		  pclmtoraster_data_t *data)	// I - conversion data
+ {
+   if (data->header.cupsBitsPerColor != 1)
+     cfImageRGBToWhite(src, dst, pixels);
+@@ -413,13 +455,12 @@ rgb_to_white_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-rgb_to_black_line(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int row,
+-		  unsigned int pixels,
+-		  pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++rgb_to_black_line(unsigned char *src,		// I - source path
++		  unsigned char *dst,		// I - output path(output of func)
++		  unsigned int row,		// I - row value
++		  unsigned int pixels,		// I - number of pixels
++		  pclmtoraster_data_t *data)	// I - conversion data
+ {
+   if (data->header.cupsBitsPerColor != 1)
+     cfImageRGBToBlack(src, dst, pixels);
+@@ -431,38 +472,35 @@ rgb_to_black_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-cmyk_to_rgb_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++cmyk_to_rgb_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageCMYKToRGB(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-cmyk_to_rgbw_line(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int row,
+-		  unsigned int pixels,
+-		  pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++cmyk_to_rgbw_line(unsigned char *src,		// I - source path
++		  unsigned char *dst,		// I - output path(output of func)
++		  unsigned int row,		// I - row value
++		  unsigned int pixels,		// I - number of pixels
++		  pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   for (unsigned int i = 0; i < 4 * pixels; i ++)
+     dst[i] = ~src[i];
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-cmyk_to_cmy_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++cmyk_to_cmy_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   // Converted first to RGB and then to cmy for better outputs.
+   cfImageCMYKToRGB(src, src, pixels);
+@@ -470,13 +508,12 @@ cmyk_to_cmy_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-cmyk_to_white_line(unsigned char *src,
+-		   unsigned char *dst,
+-		   unsigned int row,
+-		   unsigned int pixels,
+-		   pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++cmyk_to_white_line(unsigned char *src,		// I - source path
++		   unsigned char *dst,		// I - output path(output of func)
++		   unsigned int row,		// I - row value
++		   unsigned int pixels,		// I - number of pixels
++		   pclmtoraster_data_t *data)	// I - conversion data
+ {
+   if (data->header.cupsBitsPerColor != 1)
+     cfImageCMYKToWhite(src, dst, pixels);
+@@ -488,13 +525,12 @@ cmyk_to_white_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-cmyk_to_black_line(unsigned char *src,
+-		   unsigned char *dst,
+-		   unsigned int row,
+-		   unsigned int pixels,
+-		   pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++cmyk_to_black_line(unsigned char *src,		// I - source path
++		   unsigned char *dst,		// I - output path(output of func)
++		   unsigned int row,		// I - row value
++		   unsigned int pixels,		// I - number of pixels
++		   pclmtoraster_data_t *data)	// I - conversion data
+ {
+   if (data->header.cupsBitsPerColor != 1)
+     cfImageCMYKToBlack(src, dst, pixels);
+@@ -506,25 +542,23 @@ cmyk_to_black_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-gray_to_rgb_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++gray_to_rgb_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageWhiteToRGB(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-gray_to_rgbw_line(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int row,
+-		  unsigned int pixels,
+-		  pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++gray_to_rgbw_line(unsigned char *src,		// I - source path
++		  unsigned char *dst,		// I - output path(output of func)
++		  unsigned int row,		// I - row value
++		  unsigned int pixels,		// I - number of pixels
++		  pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageWhiteToCMYK(src, dst, pixels);
+   for (unsigned int i = 0; i < 4 * pixels; i ++)
+@@ -532,37 +566,34 @@ gray_to_rgbw_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-gray_to_cmyk_line(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int row,
+-		  unsigned int pixels,
+-		  pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++gray_to_cmyk_line(unsigned char *src,		// I - source path 
++		  unsigned char *dst,		// I - output path(output of func)
++		  unsigned int row,		// I - row value
++		  unsigned int pixels,		// I - number of pixels
++		  pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageWhiteToCMYK(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-gray_to_cmy_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int pixels,
+-		 pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++gray_to_cmy_line(unsigned char *src,		// I - source path
++		 unsigned char *dst,		// I - output path(output of func)
++		 unsigned int row,		// I - row value
++		 unsigned int pixels,		// I - number of pixels
++		 pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   cfImageWhiteToCMY(src, dst, pixels);
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-gray_to_black_line(unsigned char *src,
+-		   unsigned char *dst,
+-		   unsigned int row,
+-		   unsigned int pixels,
+-		   pclmtoraster_data_t *data)
++static unsigned char*				  // O - output path
++gray_to_black_line(unsigned char *src,		// I - source path
++		   unsigned char *dst,		// I - output path(output of func)
++		   unsigned int row,		// I - row value
++		   unsigned int pixels,		// I - number of pixels
++		   pclmtoraster_data_t *data)	// I - conversion data
+ {
+   if (data->header.cupsBitsPerColor != 1)
+     cfImageWhiteToBlack(src, dst, pixels);
+@@ -574,18 +605,16 @@ gray_to_black_line(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
+-convert_cspace_no_op(unsigned char *src,
+-		     unsigned char *dst,
+-		     unsigned int row,
+-		     unsigned int pixels,
+-		     pclmtoraster_data_t *data)
++static unsigned char*				  // O - ouptut path
++convert_cspace_no_op(unsigned char *src,	// I - source path
++		     unsigned char *dst,	// I - output path (output of func)
++		     unsigned int row,		// I - row value
++		     unsigned int pixels,	// I - number of pixels
++		     pclmtoraster_data_t *data)	// I - (unused) conversion data
+ {
+   return (src);
+ }
+ 
+-
+ //
+ // 'convert_line()' - Function to convert colorspace and bits-per-pixel
+ //                    of a single line of raster data.
+@@ -614,6 +643,7 @@ convert_line(unsigned char 	*src,	// I - Input line
+     dst = convertcspace(src, dst, row, pixels, data);
+   else
+   {
++    // Handle bit depth conversion if necessary
+     for (unsigned int i = 0; i < pixels; i ++)
+     {
+       unsigned char pixelBuf1[MAX_BYTES_PER_PIXEL];
+@@ -658,6 +688,7 @@ convert_reverse_line(unsigned char	*src,		// I - Input line
+   unsigned int pixels = data->header.cupsWidth;
+   if (data->header.cupsBitsPerColor == 1 && data->header.cupsNumColors == 1)
+   {
++    // Reverse 1-bit line
+     buf = convertcspace(src, buf, row, pixels, data);
+     dst = cfReverseOneBitLine(buf, dst, pixels, data->bytesPerLine);
+   }
+@@ -675,6 +706,7 @@ convert_reverse_line(unsigned char	*src,		// I - Input line
+   }
+   else
+   {
++    // General reverse with bit conversion
+     for (unsigned int i = 0; i < pixels; i ++)
+     {
+       unsigned char pixelBuf1[MAX_BYTES_PER_PIXEL];
+@@ -691,8 +723,12 @@ convert_reverse_line(unsigned char	*src,		// I - Input line
+   return (dst);
+ }
+ 
++//
++// 'select_convert_func()' - Select the appropriate conversion function 
++// 			     based on input/output color spaces
++//
+ 
+-static void					 // O - Exit status
++static void					   // O - Exit status
+ select_convert_func(int			pgno,	 // I - Page number
+ 		    cf_logfunc_t	log,	 // I - Log function
+ 		    void		*ld,	 // I - Aux. data for log
+@@ -789,8 +825,17 @@ select_convert_func(int			pgno,	 // I - Page number
+     convert->convertline = convert_line;
+ }
+ 
+-bool
+-process_image(pdfio_dict_t *dict, const char *key, pclmtoraster_data_t *data, int pixel_count, unsigned char *bitmap)
++//
++// 'process_image()' - Callback for processing images found in PDF dictionaries
++// 		       NOTE: no error code, be sure to upload image object only.
++//
++
++bool						  // O - 1 if success, 0 if fail
++process_image(pdfio_dict_t *dict, 		// I - dictionary where images are there
++	      const char *key, 			// I - key names of xobjects
++	      pclmtoraster_data_t *data, 	// I - conversion data
++	      int pixel_count, 			// I - pixel count for bitmap
++	      unsigned char *bitmap)		// O - bitmap values
+ {
+   char *buffer[4096];
+   pdfio_obj_t *image = pdfioDictGetObj(dict, key);
+@@ -803,6 +848,7 @@ process_image(pdfio_dict_t *dict, const char *key, pclmtoraster_data_t *data, in
+     if (!imgdict) 
+        return true;
+ 
++    // Read the raw image stream
+     pdfio_stream_t *img_str = pdfioObjOpenStream(image, true);
+     size_t bufsize = pdfioStreamRead(img_str, buffer, sizeof(buffer));
+     
+@@ -811,6 +857,7 @@ process_image(pdfio_dict_t *dict, const char *key, pclmtoraster_data_t *data, in
+ 
+     data->header.cupsHeight += height;
+ 
++    // Allocate memory for the bitmap data
+     if (pixel_count == 0)
+       bitmap = (unsigned char *)malloc(bufsize);
+     
+@@ -820,6 +867,7 @@ process_image(pdfio_dict_t *dict, const char *key, pclmtoraster_data_t *data, in
+     memcpy(bitmap + pixel_count, buffer, bufsize);
+     pixel_count += bufsize;
+ 
++    // Track maximum width
+     if (width > data->header.cupsWidth)
+       data->header.cupsWidth = width;
+   }
+@@ -832,7 +880,7 @@ process_image(pdfio_dict_t *dict, const char *key, pclmtoraster_data_t *data, in
+ //                input to CUPS/PWG Raster.
+ //
+ 
+-static int				// O - Exit status
++static int				  // O - Exit status
+ out_page(cups_raster_t*	 raster, 	// I - Raster stream
+ 	 pdfio_obj_t* 	 page,		// I - PDFio Page Object
+ 	 int		 pgno,		// I - Page number
+@@ -1087,13 +1135,12 @@ out_page(cups_raster_t*	 raster, 	// I - Raster stream
+   return (0);
+ }
+ 
+-
+ //
+ // 'cfFilterPCLmToRaster()' - Filter function to convert raster-only PDF/PCLm
+ //                            input to CUPS/PWG Raster output.
+ //
+ 
+-int					  // O - Error status
++int					    // O - Error status
+ cfFilterPCLmToRaster(int inputfd,         // I - File descriptor input stream
+ 		     int outputfd,        // I - File descriptor output stream
+ 		     int inputseekable,   // I - Is input stream seekable?
+@@ -1130,18 +1177,13 @@ cfFilterPCLmToRaster(int inputfd,         // I - File descriptor input stream
+   else
+     outformat = CF_FILTER_OUT_FORMAT_PWG_RASTER;
+ 
+-  fprintf(stderr, "going well");
+-
+   if (log) log(ld, CF_LOGLEVEL_DEBUG,
+ 	       "cfFilterPCLmToRaster: Output format: %s",
+ 	       (outformat == CF_FILTER_OUT_FORMAT_CUPS_RASTER ? "CUPS Raster" :
+ 		(outformat == CF_FILTER_OUT_FORMAT_PWG_RASTER ? "PWG Raster" :
+ 		 "Apple Raster")));
+ 
+-  //
+   // Open the input data stream specified by the inputfd...
+-  //
+-
+   if ((inputfp = fdopen(inputfd, "r")) == NULL)
+   {
+     if (!iscanceled || !iscanceled(icd))
+@@ -1149,7 +1191,6 @@ cfFilterPCLmToRaster(int inputfd,         // I - File descriptor input stream
+       if (log) log(ld, CF_LOGLEVEL_DEBUG,
+ 		   "cfFilterPCLmToRaster: Unable to open input data stream.");
+     }
+-
+     return (1);
+   }
+ 
+@@ -1172,6 +1213,7 @@ cfFilterPCLmToRaster(int inputfd,         // I - File descriptor input stream
+   fclose(inputfp);
+   close(fd);
+ 
++  // as the pdf is temporary, we will treat tempfile as filename 
+   filename = tempfile;
+   pdf = pdfioFileOpen(filename, NULL, NULL, NULL, NULL);
+ 
+diff --git a/cupsfilters/pdf.c b/cupsfilters/pdf.c
+index fa7ed827..b9ed48ff 100644
+--- a/cupsfilters/pdf.c
++++ b/cupsfilters/pdf.c
+@@ -2,7 +2,7 @@
+ // Copyright 2012 Canonical Ltd.
+ // Copyright 2013 ALT Linux, Andrew V. Stepanov <stanv@altlinux.com>
+ // Copyright 2018 Sahil Arora <sahilarora.535@gmail.com>
+-// Copyright 2024-2025 Uddhav Phatak <uddhavphatak@gmail.com>
++// Copyright 2024-2026 Uddhav Phatak <uddhavphatak@gmail.com>
+ //
+ // Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ // information.
+@@ -50,14 +50,16 @@ make_real_box(float values[4])  // I - Dimensions of the box in a float array
+ // 'cfPDFLoadTemplate()' - Load an existing PDF file using PDFio.
+ //
+ 
+-cf_pdf_t*
+-cfPDFLoadTemplate(const char *filename) 
++cf_pdf_t*					  // O - Pointer to cf_pdf_t struct
++cfPDFLoadTemplate(const char *filename) 	// I - Filename of the PDF file
+ {
++  // open pdf file from filename
+   pdfio_file_t *pdf = pdfioFileOpen(filename, NULL, NULL, NULL, NULL);
+ 
+   if (!pdf) 
+     return NULL;
+ 
++  // get number of pages, if it isn't 1; its invalid PDF file
+   if (pdfioFileGetNumPages(pdf) != 1) 
+   {
+     pdfioFileClose(pdf);
+@@ -71,8 +73,8 @@ cfPDFLoadTemplate(const char *filename)
+ // 'cfPDFFree()' - Free pointer used by PDF object
+ //
+ 
+-void 
+-cfPDFFree(cf_pdf_t *pdf) 
++void 				  // O - void
++cfPDFFree(cf_pdf_t *pdf) 	// I - pointer to the cf_pdf_t struct to free
+ {
+   if (pdf) 
+   {
+@@ -84,8 +86,8 @@ cfPDFFree(cf_pdf_t *pdf)
+ // 'cfPDFPages()' - Count number of pages in file using PDFio.
+ //
+ 
+-int 
+-cfPDFPages(const char *filename) 
++int 					  // O - Number of pages or -1 on error
++cfPDFPages(const char *filename) 	// I - Filename of PDF
+ {
+   pdfio_file_t *pdf = pdfioFileOpen(filename, NULL, NULL, NULL, NULL);
+ 
+@@ -103,9 +105,10 @@ cfPDFPages(const char *filename)
+ // 'cfPDFPagesFP()' - Count number of pages in file using PDFio.
+ //
+ 
+-int 
+-cfPDFPagesFP(FILE *file) 
++int 				  // O - Number of pages or -1 on error
++cfPDFPagesFP(FILE *file) 	// I - File pointer of PDF
+ {
++  // Convert the FILE to a temporary file, as PDFio doesn't open PDF without path
+   char temp_filename[] = "/tmp/pdf-file-XXXXXX";
+   int temp_fd = mkstemp(temp_filename);
+ 
+@@ -124,6 +127,7 @@ cfPDFPagesFP(FILE *file)
+     return 1;
+   }
+ 
++  // Copy contents from input stream to temporary file
+   char buffer[8192];
+   size_t bytes_read;
+   while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) 
+@@ -131,6 +135,7 @@ cfPDFPagesFP(FILE *file)
+     fwrite(buffer, 1, bytes_read, temp_fp);
+   }
+ 
++  // Open the temp file with pdfio
+   pdfio_file_t *pdf = pdfioFileOpen(temp_filename, NULL, NULL, NULL, NULL);
+ 
+   if (!pdf)
+@@ -141,6 +146,8 @@ cfPDFPagesFP(FILE *file)
+   }
+ 
+   int pages = pdfioFileGetNumPages(pdf);
++
++  // Cleanup
+   fclose(temp_fp);
+   unlink(temp_filename);
+   pdfioFileClose(pdf);
+@@ -152,23 +159,28 @@ cfPDFPagesFP(FILE *file)
+ //                          page in PDF file.
+ //
+ 
+-int 
+-cfPDFPrependStream(cf_pdf_t *pdf,
+-	       	   unsigned page_num, 
+-		   const char *buf, 
+-		   size_t len) 
++int 						  // O - 0 on success, 1 on error
++cfPDFPrependStream(cf_pdf_t *pdf,		// I - Pointer to PDF file
++	       	   unsigned page_num, 		// I - page number to prepend to
++		   const char *buf, 		// I - Buffer containing stream data
++		   size_t len) 			// I - Length of Buffer
+ {
+-
++  // This is used to place content "underneath" existing page content, typically
++  // for adding backgrounds or forms
++	
+   if(pdfioFileGetNumPages((pdfio_file_t *)pdf)==0)
+     return 1;
+ 
++  // Get the target page object
+   pdfio_obj_t *page = pdfioFileGetPage((pdfio_file_t *)pdf, page_num - 1);
+   pdfio_dict_t *pageDict = pdfioObjGetDict(page);
+ 
++  // Open the existing content stream of the page
+   pdfio_stream_t *existing_stream = pdfioPageOpenStream(page, 0, true);
+   if (!existing_stream) 
+     return 1;
+ 
++  // Create a new stream object to hold the content we want to prepend
+   pdfio_obj_t *new_stream_obj = pdfioFileCreateObj((pdfio_file_t *)pdf, pageDict);
+   if (!new_stream_obj) 
+   {
+@@ -176,6 +188,7 @@ cfPDFPrependStream(cf_pdf_t *pdf,
+     return 1;
+   }
+ 
++  // Write the new buffer (buf) into the new stream
+   pdfio_stream_t *new_stream = pdfioObjCreateStream(new_stream_obj, PDFIO_FILTER_FLATE);
+   if (!new_stream) 
+   {
+@@ -186,6 +199,9 @@ cfPDFPrependStream(cf_pdf_t *pdf,
+   pdfioStreamWrite(new_stream, buf, len);
+   pdfioStreamClose(new_stream);
+ 
++  // Create a combined stream on the page to merge new + existing
++  // NOTE :  This logic does overwriting/appending to the page content stream,
++  // 	     be cautious while making changes
+   pdfio_stream_t *combined_stream = pdfioObjCreateStream(page, PDFIO_FILTER_FLATE);
+   if (!combined_stream) 
+   {
+@@ -193,6 +209,7 @@ cfPDFPrependStream(cf_pdf_t *pdf,
+     return 1;
+   }
+ 
++  // Copy existing stream content to the combined stream
+   char buffer[1024];
+   size_t read_len;
+   while ((read_len = pdfioStreamRead(existing_stream, buffer, sizeof(buffer))) > 0) 
+@@ -209,16 +226,17 @@ cfPDFPrependStream(cf_pdf_t *pdf,
+ //                         page in a PDF document.
+ //
+ 
+-int 
+-cfPDFAddType1Font(cf_pdf_t *pdf, 
+-		  unsigned page_num, 
+-		  const char *name) 
++int 					  // O - 0 on success , 1 on error
++cfPDFAddType1Font(cf_pdf_t *pdf, 	// I - Pointer to PDF object
++		  unsigned page_num, 	// I - Page number to add font to
++		  const char *name) 	// I - Name of the font
+ {
+   pdfio_obj_t *page = pdfioFileGetPage((pdfio_file_t *)pdf, page_num);
+   pdfio_dict_t *pageDict = pdfioObjGetDict(page);
+   if (!page) 
+     return 1; 
+ 
++  // Locate or create the Resources dictionary
+   pdfio_dict_t *resources = pdfioDictGetDict(pageDict, "Resources");
+ 
+   if (!resources) 
+@@ -227,6 +245,7 @@ cfPDFAddType1Font(cf_pdf_t *pdf,
+     pdfioDictSetDict(pageDict, "Resources", resources);
+   }
+ 
++  // Locate or create the Font dictionary within Resources
+   pdfio_dict_t *fonts = pdfioDictGetDict(resources, "Font");
+   if (!fonts) 
+   {
+@@ -234,6 +253,7 @@ cfPDFAddType1Font(cf_pdf_t *pdf,
+     pdfioDictSetDict(resources, "Font", fonts);
+   }
+ 
++  // Create the specific Font dictionary for this Type1 font
+   pdfio_dict_t *font = pdfioDictCreate((pdfio_file_t *)pdf);
+   if (!font) 
+     return 1; 
+@@ -244,6 +264,8 @@ cfPDFAddType1Font(cf_pdf_t *pdf,
+   snprintf(basefont, sizeof(basefont), "/%s", name);
+   pdfioDictSetName(font, "BaseFont", basefont);
+ 
++  // Register the font under the name "bannertopdf-font"
++  // Note: This fixed key name implies only one such font can be added per page via this function.
+   pdfioDictSetDict(fonts, "bannertopdf-font", font);
+ 
+   return 0;
+@@ -255,7 +277,7 @@ cfPDFAddType1Font(cf_pdf_t *pdf,
+ //                        an array and return true, else return false.
+ //
+ 
+-static bool
++static bool				 // O - true if found, false otherwise
+ dict_lookup_rect(pdfio_obj_t *object,  // I - PDF dictionary object
+                  const char *key,      // I - Key to lookup
+                  float rect[4],        // O - Array to store values if key is found
+@@ -312,11 +334,12 @@ fit_rect(float oldrect[4],  // I - Old media box
+ // 'cfPDFResizePage()' - Resize page in a PDF with the given dimensions.
+ //
+ 
+-int cfPDFResizePage(cf_pdf_t *pdf,   // I - Pointer to PDFio file object
+-                    unsigned page_num,   // I - Page number (1-based index)
+-                    float width,         // I - New width of the page
+-                    float length,        // I - New length of the page
+-                    float *scale)        // O - Scale of the page to be updated
++int 					// O - 0 if success, 1 if error
++cfPDFResizePage(cf_pdf_t *pdf,       // I - Pointer to PDFio file object
++                unsigned page_num,   // I - Page number (1-based index)
++                float width,         // I - New width of the page
++                float length,        // I - New length of the page
++                float *scale)        // O - Scale of the page to be updated
+ {
+   pdfio_obj_t *page = pdfioFileGetPage((pdfio_file_t *)pdf, page_num - 1);
+   if (!page)
+@@ -326,12 +349,14 @@ int cfPDFResizePage(cf_pdf_t *pdf,   // I - Pointer to PDFio file object
+   float old_mediabox[4];
+   pdfio_rect_t media_box;
+ 
++  // Get original dimensions to calculate scale
+   if (!dict_lookup_rect(page, "MediaBox", old_mediabox, true))
+     return (1);
+   
+   fit_rect(old_mediabox, new_mediabox, scale);
+   media_box = make_real_box(new_mediabox);
+   
++  // Set the new boxes
+   pdfio_dict_t *pageDict = pdfioObjGetDict(page);
+   if (pageDict)
+   {
+@@ -348,10 +373,10 @@ int cfPDFResizePage(cf_pdf_t *pdf,   // I - Pointer to PDFio file object
+ // 'cfPDFDuplicatePage()' - Duplicate a specified pdf page in a PDF
+ //
+ 
+-int 
+-cfPDFDuplicatePage(cf_pdf_t *pdf, 
+-		   unsigned page_num,
+-		   unsigned count) 
++int 					  // O - 0 if success, 1 if error
++cfPDFDuplicatePage(cf_pdf_t *pdf, 	// I - pointer to PDF file
++		   unsigned page_num,	// I - page number
++		   unsigned count) 	// I - number of copies to make
+ {
+   pdfio_obj_t *page = pdfioFileGetPage((pdfio_file_t *)pdf, page_num - 1);
+ 
+@@ -374,6 +399,7 @@ void
+ cfPDFWrite(cf_pdf_t *pdf, 
+ 	   FILE *file) 
+ {
++// TODO
+ //  pdfioFileCreateImageObjFromFile((pdfio_file_t *)pdf, file, false);
+ }
+ 
+diff --git a/cupsfilters/pdf.h b/cupsfilters/pdf.h
+index 9ce92450..133b31e3 100644
+--- a/cupsfilters/pdf.h
++++ b/cupsfilters/pdf.h
+@@ -1,7 +1,7 @@
+ //
+ // Copyright 2012 Canonical Ltd.
+ // Copyright 2018 Sahil Arora <sahilarora.535@gmail.com>
+-// Copyright 2024-2025 Uddhav Phatak <uddhavphatak@gmail.com>
++// Copyright 2024-2026 Uddhav Phatak <uddhavphatak@gmail.com>
+ //
+ // Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ // information.
+diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+index 56616c27..c3bfe814 100644
+--- a/cupsfilters/pdftoraster.c
++++ b/cupsfilters/pdftoraster.c
+@@ -1,7 +1,7 @@
+ //
+ // PDF to Raster filter function for libcupsfilters.
+ //
+-// Copyright (c) 2024-2025 by Uddhav Phatak <uddhavphatak@gmail.com> 
++// Copyright (c) 2024-2026 by Uddhav Phatak <uddhavphatak@gmail.com> 
+ //
+ // Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ // information.
+@@ -85,8 +85,12 @@ typedef struct cms_profile_s
+   cf_cm_calibration_t cm_calibrate;
+ } cms_profile_t;
+ 
++//
++// 'init_cms_profile_t()' - Initialize the CMS profile structure.
++//
++
+ void
+-init_cms_profile_t(cms_profile_t *profile)
++init_cms_profile_t(cms_profile_t *profile)	// I - profile structure to init
+ {
+   profile->colorProfile = NULL;
+   profile->popplerColorProfile = NULL;
+@@ -104,7 +108,7 @@ typedef struct pdftoraster_doc_s
+   unsigned int bitspercolor;
+   unsigned int popplerNumColors; 
+   unsigned int bitmapoffset[2];
+-  pdfio_file_t *poppler_doc;
++  pdfio_file_t *pdf_doc;
+   cups_page_header_t header;
+   cf_logfunc_t logfunc;                 // Logging function, NULL for no
+                                         // logging
+@@ -148,9 +152,12 @@ typedef struct pdf_conversion_function_s
+   convert_line_func convertLineEven;
+ } pdf_conversion_function_t;
+ 
++// 
++// 'init_pdftoraster_doc_t()' - Initialize the document structure.
++//
+ 
+ void
+-init_pdftoraster_doc_t(pdftoraster_doc_t *doc)
++init_pdftoraster_doc_t(pdftoraster_doc_t *doc)	// 0 - document structure.
+ {
+   doc->pwgraster = 0;
+   doc->bi_level = 0;
+@@ -165,7 +172,12 @@ init_pdftoraster_doc_t(pdftoraster_doc_t *doc)
+   init_cms_profile_t(doc->colour_profile);
+ }
+ 
+-static cmsCIExyY adobergb_wp()
++//
++// 'adobergb_wp()' - Return the AdobeRGB white point.
++//
++ 
++static cmsCIExyY 	// O - AdobeRGB white poin
++adobergb_wp()
+ {
+   double * xyY = cfCmWhitePointAdobeRGB();
+   cmsCIExyY wp;
+@@ -177,8 +189,12 @@ static cmsCIExyY adobergb_wp()
+   return (wp);
+ }
+ 
++//
++// 'sgray_wp()' - Return the sGray white point.
++//
+ 
+-static cmsCIExyY sgray_wp()
++static cmsCIExyY 	// O - sGray white poin
++sgray_wp()
+ {
+   double * xyY = cfCmWhitePointSGray();
+   cmsCIExyY wp;
+@@ -190,7 +206,12 @@ static cmsCIExyY sgray_wp()
+   return (wp);
+ }
+ 
+-static cmsCIExyYTRIPLE adobergb_matrix()
++//
++// 'adobergb_matrix()' - Return the AdobeRGB matrix.
++//
++
++static cmsCIExyYTRIPLE 	    // O - AdobeRGB matrix
++adobergb_matrix()
+ {
+   cmsCIExyYTRIPLE m;
+ 
+@@ -209,7 +230,11 @@ static cmsCIExyYTRIPLE adobergb_matrix()
+   return (m);
+ }
+ 
+-static cmsHPROFILE
++//
++// 'adobergb_profile()' - Create the AdobeRGB profile.
++//
++
++static cmsHPROFILE	// O - AdobeRGB profile
+ adobergb_profile()
+ {
+   cmsHPROFILE adobergb;
+@@ -234,7 +259,11 @@ adobergb_profile()
+   return (adobergb);
+ }
+ 
+-static cmsHPROFILE
++//
++// 'sgray_profile()' - Create the sGray profile.
++//
++
++static cmsHPROFILE	// O - sGray profile
+ sgray_profile()
+ {
+     cmsHPROFILE sgray;
+@@ -253,7 +282,6 @@ sgray_profile()
+     return (sgray);
+ }
+ 
+-
+ #ifdef USE_LCMS1
+ static int
+ lcms_error_handler(int ErrorCode,
+@@ -271,11 +299,17 @@ lcms_error_handler(cmsContext contextId,
+ }
+ #endif
+ 
+-static int
+-parse_opts(cf_filter_data_t *data,
+-           cf_filter_out_format_t *outformat,
+-           pdftoraster_doc_t *doc)
+-{ 
++//
++// 'parse_opts()' - Parse command-line options and attributes.
++//
++
++static int					  // O - error Handling
++parse_opts(cf_filter_data_t *data,		// I - filter data with job opts and 
++						// attributes.
++           cf_filter_out_format_t *outformat,	// I - Output Format struct
++           pdftoraster_doc_t *doc)		// I - Document struct to populate
++{
++  // Job options and attributes
+   int num_options = 0;
+   cups_option_t *options = NULL;            
+   char *profile = NULL;
+@@ -285,13 +319,15 @@ parse_opts(cf_filter_data_t *data,
+   void *ld = data ->logdata;
+   cups_cspace_t cspace = (cups_cspace_t)(-1);
+   
++  // select what's the Output Format
+   if (*outformat == CF_FILTER_OUT_FORMAT_PWG_RASTER ||
+       *outformat == CF_FILTER_OUT_FORMAT_APPLE_RASTER||
+       *outformat == CF_FILTER_OUT_FORMAT_PCLM)
+     doc->pwgraster = 1;                       
+                                       
+   num_options = cfJoinJobOptionsAndAttrs(data, num_options, &options);
+-                                              
++                                      
++  // get the specific PDF raster for CUPS_RASTER & PWG_RASTER  
+   if (*outformat == CF_FILTER_OUT_FORMAT_CUPS_RASTER ||
+       *outformat == CF_FILTER_OUT_FORMAT_PWG_RASTER) 
+   {                                         
+@@ -315,15 +351,14 @@ parse_opts(cf_filter_data_t *data,
+     }
+   }
+ 
++  // Prepare the header for the PWG files
+   memset(&(doc->header), 0, sizeof(doc->header));
+   cfRasterPrepareHeader(&(doc->header), data, *outformat,
+                         (*outformat == CF_FILTER_OUT_FORMAT_PWG_RASTER ||
+-                         *outformat == CF_FILTER_OUT_FORMAT_APPLE_RASTER ?
+-                         *outformat :
+-                         (*outformat == CF_FILTER_OUT_FORMAT_PCLM ?
+-                          CF_FILTER_OUT_FORMAT_PWG_RASTER :
+-                          CF_FILTER_OUT_FORMAT_CUPS_RASTER)), 0,
+-                        &cspace);
++                          *outformat == CF_FILTER_OUT_FORMAT_APPLE_RASTER ?  *outformat :
++                            (*outformat == CF_FILTER_OUT_FORMAT_PCLM ?
++                              CF_FILTER_OUT_FORMAT_PWG_RASTER :
++                               CF_FILTER_OUT_FORMAT_CUPS_RASTER)), 0, &cspace);
+ 
+   doc->header.cupsRenderingIntent[0] = '\0';
+   cfGetPrintRenderIntent(data, doc->header.cupsRenderingIntent,
+@@ -341,6 +376,7 @@ parse_opts(cf_filter_data_t *data,
+   if(log) log(ld, CF_LOGLEVEL_DEBUG,
+               "Print rendering intent = %s", doc->header.cupsRenderingIntent);
+ 
++  // see if printing options state Duplex Mode
+   if (doc->header.Duplex)
+   {
+     int backside;
+@@ -424,10 +460,15 @@ parse_opts(cf_filter_data_t *data,
+   return (0);
+ }
+ 
++//
++// 'parse_pdftopdf_comment()' - Parse specific comments (e.g., Copies, Collate) 
++// 				from the PDF header.
++//
++
+ static void
+-parse_pdftopdf_comment(FILE *fp,
+-                       int* deviceCopies,
+-                       bool* deviceCollate)
++parse_pdftopdf_comment(FILE *fp,		// I - Pointer to File
++                       int* deviceCopies,	// I - Number of Device Copies
++                       bool* deviceCollate)	// I - whether output is Collate?
+ {
+   char buf[4096];
+   int i;
+@@ -462,15 +503,19 @@ parse_pdftopdf_comment(FILE *fp,
+   }
+ }
+ 
+-static unsigned char *
+-reverse_line(unsigned char *src,
+-	     unsigned char *dst,
+-	     unsigned int row,
+-	     unsigned int plane,
+-	     unsigned int pixels,
+-	     unsigned int size,
+-	     pdftoraster_doc_t* doc,
+-	     convert_cspace_func convertCSpace)
++//
++// 'reverse_line()' - Invert bits/bytes in a line of raster data.
++//
++
++static unsigned char*				  // O - inverted string
++reverse_line(unsigned char *src,		// I - Source Pixel Data
++	     unsigned char *dst,		// I - Destination Buffer(can be same as src)
++	     unsigned int row,			// I - Current Row Index
++	     unsigned int plane,		// I - Current Plane Index
++	     unsigned int pixels,		// I - Number of Pixels in Line
++	     unsigned int size,			// I - Total size in Bytes
++	     pdftoraster_doc_t* doc,		// I - Document Structure
++	     convert_cspace_func convertCSpace) // I - (unused) colour space conversion
+ {
+   unsigned char *p = src;
+ 
+@@ -479,8 +524,11 @@ reverse_line(unsigned char *src,
+   return (src);
+ }
+ 
++//
++// 'reverse_line_swap_byte()' - Callback function for 'reverse_line()'
++//
+ 
+-static unsigned char *
++static unsigned char*					  
+ reverse_line_swap_byte(unsigned char *src,
+ 		       unsigned char *dst,
+ 		       unsigned int row,
+@@ -498,8 +546,11 @@ reverse_line_swap_byte(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'reverse_line_swap_bit()' - Callback function for 'reverse_line()'
++//
+ 
+-static unsigned char *
++static unsigned char*
+ reverse_line_swap_bit(unsigned char *src,
+ 		      unsigned char *dst,
+ 		      unsigned int row,
+@@ -513,21 +564,27 @@ reverse_line_swap_bit(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'rgb_to_cmyk_line()' - Convert an RGB line to CMYK.
++//
+ 
+-static unsigned char *
+-rgb_to_cmyk_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int plane,
+-		 unsigned int pixels,
+-		 unsigned int size,
+-		 pdftoraster_doc_t* doc,
+-		 convert_cspace_func convertCSpace)
++static unsigned char*					  // O - Converted Line 
++rgb_to_cmyk_line(unsigned char *src,			// I - Source Pixel Data
++		 unsigned char *dst,			// O - Destination Buffer
++		 unsigned int row,			// I - Current Row Index
++		 unsigned int plane,			// I - Current Plane Index
++		 unsigned int pixels,			// I - Number of Pixels in line
++		 unsigned int size,			// I - Total size in Bytes
++		 pdftoraster_doc_t* doc,		// I - Document Structure
++		 convert_cspace_func convertCSpace)	// I - (unused) colour Space conversion
+ {
+   cfImageRGBToCMYK(src, dst, pixels);
+   return (dst);
+-}
++}	
+ 
++//
++// 'rgb_to_cmyk_line_swap' - Callbakc for 'rgb_to_cmyk_line()'
++//
+ 
+ static unsigned char *
+ rgb_to_cmyk_line_swap(unsigned char *src,
+@@ -547,21 +604,27 @@ rgb_to_cmyk_line_swap(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'rgb_to_cmy_line()' - Convert an RGB to CMYK line
++//
+ 
+-static unsigned char *
+-rgb_to_cmy_line(unsigned char *src,
+-		unsigned char *dst,
+-		unsigned int row,
+-		unsigned int plane,
+-		unsigned int pixels,
+-		unsigned int size,
+-		pdftoraster_doc_t* doc,
+-		convert_cspace_func convertCSpace)
++static unsigned char*				     // O - converted line
++rgb_to_cmy_line(unsigned char *src,		   // I - Source Pixel Data
++		unsigned char *dst,		   // O - Destination Buffer
++		unsigned int row,		   // I - Current Row Index
++		unsigned int plane,		   // I - Current Plane Index
++		unsigned int pixels,		   // I - Number of Pixels in line
++		unsigned int size,		   // I - Total size in Bytes
++		pdftoraster_doc_t* doc,		   // I - Document Structure
++		convert_cspace_func convertCSpace) // I - (unused) Colour space conversion
+ {
+   cfImageRGBToCMY(src, dst, pixels);
+   return (dst);
+ }
+ 
++//
++// 'rgb_to_cmy_line_swap' - Callbakc for 'rgb_to_cmy_line()'
++//
+ 
+ static unsigned char *
+ rgb_to_cmy_line_swap(unsigned char *src,
+@@ -581,23 +644,28 @@ rgb_to_cmy_line_swap(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'rgb_to_kcmy_line()' - Convert an RGB to KCMY line
++//
+ 
+-static unsigned char *
+-rgb_to_kcmy_line(unsigned char *src,
+-		 unsigned char *dst,
+-		 unsigned int row,
+-		 unsigned int plane,
+-		 unsigned int pixels,
+-		 unsigned int size,
+-		 pdftoraster_doc_t* doc,
+-		 convert_cspace_func convertCSpace)
++static unsigned char*					  // O - Converted Line
++rgb_to_kcmy_line(unsigned char *src,			// I - Source Pixel Data
++		 unsigned char *dst,			// O - Destination Buffer
++		 unsigned int row,			// I - Current Row Index
++		 unsigned int plane,			// I - Current Plane Index
++		 unsigned int pixels,			// I - Number of Pixels in line
++		 unsigned int size,			// I - Total size in Bytes
++		 pdftoraster_doc_t* doc,		// I - Document Structure
++		 convert_cspace_func convertCSpace)	// I - (unused) colour space converstion
+ {
+   unsigned char *bp = src;
+   unsigned char *dp = dst;
+   unsigned char d;
+ 
++  // Convert RGB to CMYK
+   cfImageRGBToCMYK(src, dst, pixels);
+-  // CMYK to KCMY
++  
++  // now convert CMYK to KCMY
+   for (unsigned int i = 0; i < pixels; i++, bp += 3, dp += 4)
+   {
+     d = dp[3];
+@@ -609,8 +677,9 @@ rgb_to_kcmy_line(unsigned char *src,
+   return (dst);
+ }
+ 
++// 'rgb_to_kcmy_line_swap()' - Callback for 'rgb_to_kcmy_line_swap()'
+ 
+-static unsigned char *
++static unsigned char*
+ rgb_to_kcmy_line_swap(unsigned char *src,
+ 		      unsigned char *dst,
+ 		      unsigned int row,
+@@ -637,6 +706,9 @@ rgb_to_kcmy_line_swap(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'line_no_op()' - Do no operation. 
++//
+ 
+ static unsigned char *
+ line_no_op(unsigned char *src,
+@@ -652,8 +724,11 @@ line_no_op(unsigned char *src,
+   return (src);
+ }
+ 
++//
++// 'line_swap_24()' - Callback for 'line_no_op()'
++//
+ 
+-static unsigned char *
++static unsigned char*
+ line_swap_24(unsigned char *src,
+ 	     unsigned char *dst,
+ 	     unsigned int row,
+@@ -675,6 +750,9 @@ line_swap_24(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'line_swap_byte' - Callback for 'line_no_op()'
++// 
+ 
+ static unsigned char *
+ line_swap_byte(unsigned char *src,
+@@ -694,6 +772,9 @@ line_swap_byte(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'line_swap_bit' - Callback for 'line_no_op()'
++//
+ 
+ static unsigned char *
+ line_swap_bit(unsigned char *src,
+@@ -709,7 +790,6 @@ line_swap_bit(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+ typedef struct func_table_s
+ {
+   enum cups_cspace_e cspace;
+@@ -721,7 +801,7 @@ typedef struct func_table_s
+   bool allocLineBufSwap;
+ } func_table_t;
+ 
+-
++// Function table for Special Edge Cases
+ static func_table_t specialCaseFuncs[] =
+ {
+   {CUPS_CSPACE_K, 8, 8, reverse_line, false, reverse_line_swap_byte, true},
+@@ -745,35 +825,45 @@ static func_table_t specialCaseFuncs[] =
+   {CUPS_CSPACE_RGB, 0, 0, NULL, false, NULL, false} // end mark
+ };
+ 
+-static unsigned char *
+-convert_cspace_none(unsigned char *src,
+-		    unsigned char *pixelBuf,
+-		    unsigned int x,
+-		    unsigned int y,
+-		    pdftoraster_doc_t *doc)
++// 
++// 'convert_cspace_none()' - Convert the Colour space, but this function doesn't
++//
++
++static unsigned char*				  // O - output CSpace
++convert_cspace_none(unsigned char *src,		// I - Source CS
++		    unsigned char *pixelBuf,	// I - (unused)Pixel Buffer for calculation
++		    unsigned int x,		// I - x
++		    unsigned int y,		// I - y
++		    pdftoraster_doc_t *doc)	// I - document telling conversion details
+ {
+   return (src);
+ }
+ 
++//
++// 'convert_cspace_with_profiles()' - Convert the Colour Space, output should have profiles
++//
+ 
+-static unsigned char *
+-convert_cspace_with_profiles(unsigned char *src,
+-			     unsigned char *pixelBuf,
+-			     unsigned int x,
+-			     unsigned int y,
+-			     pdftoraster_doc_t *doc)
++static unsigned char*					  // O - Output CSpace
++convert_cspace_with_profiles(unsigned char *src,	// I - Source CS
++			     unsigned char *pixelBuf,	// I - pixel Buffer for calculation
++			     unsigned int x,		// I - 
++			     unsigned int y,		// I - 
++			     pdftoraster_doc_t *doc)	// I - document with conversion details
+ {
+   cmsDoTransform(doc->colour_profile->colorTransform, src, pixelBuf, 1);
+   return (pixelBuf);
+ }
+ 
++//
++// 'convert_cspace_xyz_8()' - Convert Colourspace, with x*y*z colourspace of 8 bits
++//
+ 
+-static unsigned char *
+-convert_cspace_xyz_8(unsigned char *src,
+-		     unsigned char *pixelBuf,
+-		     unsigned int x,
+-		     unsigned int y,
+-		     pdftoraster_doc_t *doc)
++static unsigned char*				  // O - Output CSpace
++convert_cspace_xyz_8(unsigned char *src,	// I - Souce CS
++		     unsigned char *pixelBuf,	// I - pixel Buffer for calculations
++		     unsigned int x,		// I - 
++		     unsigned int y,		// I - 
++		     pdftoraster_doc_t *doc)	// I - document with conversion details
+ {
+   double alab[3];
+ 
+@@ -792,13 +882,16 @@ convert_cspace_xyz_8(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'convert_cspace_xyz_16()' - Convert Colourspace, with x*y*z colourspace of 16 bits
++//
+ 
+-static unsigned char *
+-convert_cspace_xyz_16(unsigned char *src,
+-		      unsigned char *pixelBuf,
+-		      unsigned int x,
+-		      unsigned int y,
+-		      pdftoraster_doc_t *doc)
++static unsigned char*				  // O - Ouput CSpace
++convert_cspace_xyz_16(unsigned char *src,	// I - Source CS
++		      unsigned char *pixelBuf,	// I - pixel Buffer for calculations
++		      unsigned int x,		// I -
++		      unsigned int y,		// I - 
++		      pdftoraster_doc_t *doc)	// I - Document with conversion details
+ {
+   double alab[3];
+   unsigned short *sd = (unsigned short *)pixelBuf;
+@@ -818,13 +911,16 @@ convert_cspace_xyz_16(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'convert_cspace_lab_8()' - Convert Colourspace, with l*a*b colourspace of 8 bits
++//
+ 
+-static unsigned char *
+-convert_cspace_lab_8(unsigned char *src,
+-		     unsigned char *pixelBuf,
+-		     unsigned int x,
+-		     unsigned int y,
+-		     pdftoraster_doc_t *doc)
++static unsigned char*				  // O - Output CSpace
++convert_cspace_lab_8(unsigned char *src,	// I - Source CS
++		     unsigned char *pixelBuf,	// I - Pixel Buffer for Calculations
++		     unsigned int x,		// I - 
++		     unsigned int y,		// I - 
++		     pdftoraster_doc_t *doc)	// I - Document with conversion details
+ {
+   double lab[3];
+ 
+@@ -832,16 +928,20 @@ convert_cspace_lab_8(unsigned char *src,
+   pixelBuf[0] = 2.55 * lab[0] + 0.5;
+   pixelBuf[1] = lab[1] + 128.5;
+   pixelBuf[2] = lab[2] + 128.5;
++
+   return (pixelBuf);
+ }
+ 
++//
++// 'convert_cspace_lab_16()' - Convert Colourspace, with l*a*b colourspace of 16 bits
++//
+ 
+-static unsigned char *
+-convert_cspace_lab_16(unsigned char *src,
+-		      unsigned char *pixelBuf,
+-		      unsigned int x,
+-		      unsigned int y,
+-		      pdftoraster_doc_t *doc)
++static unsigned char*				  // O - Ouptut CSpace 
++convert_cspace_lab_16(unsigned char *src,	// I - Source CS
++		      unsigned char *pixelBuf,	// I - Pixel Buffer for Calculations
++		      unsigned int x,		// I - 
++		      unsigned int y,		// I - 
++		      pdftoraster_doc_t *doc)	// I - Document with conversion details
+ {
+   double lab[3];
+ 
+@@ -853,13 +953,16 @@ convert_cspace_lab_16(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_rgba()' - Convert Colourspace, r*g*b of 8 bits to r*g*b with alpha channel
++//
+ 
+-static unsigned char *
+-rgb_8_to_rgba(unsigned char *src,
+-	      unsigned char *pixelBuf,
+-	      unsigned int x,
+-	      unsigned int y,
+-	      pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_rgba(unsigned char *src,	// I - Source CS
++	      unsigned char *pixelBuf,	// I - Pixel Buffer for Calculations
++	      unsigned int x,		// I - 
++	      unsigned int y,		// I - 
++	      pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   unsigned char *dp = pixelBuf;
+ 
+@@ -869,13 +972,16 @@ rgb_8_to_rgba(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_rgba()' - Convert Colourspace, r*g*b of 8 bits to r*g*b with white diode
++//
+ 
+-static unsigned char *
+-rgb_8_to_rgbw(unsigned char *src,
+-	      unsigned char *pixelBuf,
+-	      unsigned int x,
+-	      unsigned int y,
+-	      pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_rgbw(unsigned char *src,	// I - Source CS
++	      unsigned char *pixelBuf,	// I - Pixel Buffer for calculations
++	      unsigned int x,		// I - 
++	      unsigned int y,		// I - 
++	      pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   unsigned char cmyk[4];
+   unsigned char *dp = pixelBuf;
+@@ -886,37 +992,46 @@ rgb_8_to_rgbw(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_cmyk' - Convert Colourspace, r*g*b of 8 bits to c*m*y*k
++//
+ 
+-static unsigned char *
+-rgb_8_to_cmyk(unsigned char *src,
+-	      unsigned char *pixelBuf,
+-	      unsigned int x,
+-	      unsigned int y,
+-	      pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_cmyk(unsigned char *src,	// I - Source CS
++	      unsigned char *pixelBuf,	// I - Pixel Buffer for calculations
++	      unsigned int x,		// I - 
++	      unsigned int y,		// I - 
++	      pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   cfImageRGBToCMYK(src, pixelBuf, 1);
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_cmy' - Convert Colourspace, r*g*b of 8 bits to c*m*y
++//
+ 
+-static unsigned char *
+-rgb_8_to_cmy(unsigned char *src,
+-	     unsigned char *pixelBuf,
+-	     unsigned int x,
+-	     unsigned int y,
+-	     pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_cmy(unsigned char *src,	// I - Source CS
++	     unsigned char *pixelBuf,	// I - Pixel Buffer for calculations
++	     unsigned int x,		// I -
++	     unsigned int y,		// I - 
++	     pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   cfImageRGBToCMY(src, pixelBuf, 1);
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_ymc' - Convert Colourspace, r*g*b of 8 bits to y*m*c
++//
+ 
+-static unsigned char *
+-rgb_8_to_ymc(unsigned char *src,
+-	     unsigned char *pixelBuf,
+-	     unsigned int x,
+-	     unsigned int y,
+-	     pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_ymc(unsigned char *src,	// I - Source CS
++	     unsigned char *pixelBuf,	// I - Pixel Buffer for calculations
++	     unsigned int x,		// I - 
++	     unsigned int y,		// I -
++	     pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   cfImageRGBToCMY(src, pixelBuf, 1);
+   // swap C and Y
+@@ -926,71 +1041,94 @@ rgb_8_to_ymc(unsigned char *src,
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_kcmy' - Convert Colourspace, r*g*b of 8 bits to k*c*m*y
++//
+ 
+-static unsigned char *
+-rgb_8_to_kcmy(unsigned char *src,
+-	      unsigned char *pixelBuf,
+-	      unsigned int x,
+-	      unsigned int y,
+-	      pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_kcmy(unsigned char *src,	// I - Source CS
++	      unsigned char *pixelBuf,	// I - Pixel Buffer for calculations 
++	      unsigned int x,		// I - 
++	      unsigned int y,		// I - 
++	      pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   cfImageRGBToCMYK(src, pixelBuf, 1);
++
+   unsigned char d = pixelBuf[3];
+   pixelBuf[3] = pixelBuf[2];
+   pixelBuf[2] = pixelBuf[1];
+   pixelBuf[1] = pixelBuf[0];
+   pixelBuf[0] = d;
++
+   return (pixelBuf);
+ }
+ 
++//
++// 'rgb_8_to_kcmycm_temp' - Convert Colourspace, r*g*b of 8 bits to 
++// 			    k*c*m*y*c*m_temp(Kelvin Color Temperature)
++//
+ 
+-static unsigned char *
+-rgb_8_to_kcmycm_temp(unsigned char *src,
+-		     unsigned char *pixelBuf,
+-		     unsigned int x,
+-		     unsigned int y,
+-		     pdftoraster_doc_t* doc)
++static unsigned char*				  // O - Output CSpace 
++rgb_8_to_kcmycm_temp(unsigned char *src,	// I - Source CS
++		     unsigned char *pixelBuf,	// I - Pixel Buffer for calculations
++		     unsigned int x,		// I - 
++		     unsigned int y,		// I - 
++		     pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   return (cfRGB8toKCMYcm(src, pixelBuf, x, y));
+ }
+ 
++//
++// 'rgb_8_toycmk' - Convert Colourspace, r*g*b of 8 bits to y*m*c*k
++//
+ 
+-static unsigned char *
+-rgb_8_to_ymck(unsigned char *src,
+-	      unsigned char *pixelBuf,
+-	      unsigned int x,
+-	      unsigned int y,
+-	      pdftoraster_doc_t* doc)
++static unsigned char*			  // O - Output CSpace
++rgb_8_to_ymck(unsigned char *src,	// I - Source CS
++	      unsigned char *pixelBuf,	// I - Pixel Buffer for calculations 
++	      unsigned int x,		// I - 
++	      unsigned int y,		// I - 
++	      pdftoraster_doc_t* doc)	// I - Document with conversion details
+ {
+   cfImageRGBToCMYK(src, pixelBuf, 1);
++
+   // swap C and Y
+   unsigned char d = pixelBuf[0];
+   pixelBuf[0] = pixelBuf[2];
+   pixelBuf[2] = d;
++
+   return (pixelBuf);
+ }
+ 
++//
++// 'w_8_to_k_8()' - Convert Colourspace, w*8(Wide Color Gamut) to k*8(12bit color depth)
++// 		    Both are not standard RGB colour palette
++//
+ 
+-static unsigned char *
+-w_8_to_k_8(unsigned char *src,
+-	   unsigned char *pixelBuf,
+-	   unsigned int x,
+-	   unsigned int y,
+-	   pdftoraster_doc_t *doc)
++static unsigned char*			  // O - Output CSpace
++w_8_to_k_8(unsigned char *src,		// I - Source CS
++	   unsigned char *pixelBuf,	// I - Pixel Buffer for Calculations
++	   unsigned int x,		// I -
++	   unsigned int y,		// I -
++	   pdftoraster_doc_t *doc)	// I - Document with conversion details
+ {
+   *pixelBuf = ~(*src);
+   return (pixelBuf);
+ }
+ 
+-static unsigned char *
+-convert_line_chunked(unsigned char *src,
+-		     unsigned char *dst,
+-		     unsigned int row,
+-		     unsigned int plane,
+-		     unsigned int pixels,
+-		     unsigned int size,
+-		     pdftoraster_doc_t *doc,
+-		     convert_cspace_func convertCSpace)
++//
++// 'convert_line_chunked()' - process line of pixels with "chunked" (pixel-interleaved) 
++// 			      format.
++//
++
++static unsigned char*					  // O - Output line
++convert_line_chunked(unsigned char *src,		// I - source Pixel line
++		     unsigned char *dst,		// O - destination Pixel line
++		     unsigned int row,			// I - row index
++		     unsigned int plane,		// I - plane index
++		     unsigned int pixels,		// I - number of pixels
++		     unsigned int size,			// I - size of line
++		     pdftoraster_doc_t *doc,		// I - Document with output
++		     convert_cspace_func convertCSpace)	// I - CSpace
+ {
+   // Assumed that BitsPerColor is 8
+   for (unsigned int i = 0; i < pixels; i ++)
+@@ -1009,16 +1147,19 @@ convert_line_chunked(unsigned char *src,
+   return (dst);
+ }
+ 
++// 
++// 'convert_line_chunked_swap' - Callback function to convert_line_chunked
++//
+ 
+-static unsigned char *
+-convert_line_chunked_swap(unsigned char *src,
+-			  unsigned char *dst,
+-			  unsigned int row,
+-			  unsigned int plane,
+-			  unsigned int pixels,
+-			  unsigned int size,
+-			  pdftoraster_doc_t* doc,
+-			  convert_cspace_func convertCSpace)
++static unsigned char*					  // O - output line
++convert_line_chunked_swap(unsigned char *src,		// I - Source Pixel line
++			  unsigned char *dst,		// O - Destination Pixel line
++			  unsigned int row,		// I - Row Index
++			  unsigned int plane,		// I - plane Index
++			  unsigned int pixels,		// I - Number of Pixels
++			  unsigned int size,		// I - size of line
++			  pdftoraster_doc_t* doc,	// I - Document with output
++			  convert_cspace_func convertCSpace)	// I - CSpace
+ {
+   // Assumed that BitsPerColor is 8
+   for (unsigned int i = 0; i < pixels; i++)
+@@ -1037,15 +1178,20 @@ convert_line_chunked_swap(unsigned char *src,
+   return (dst);
+ }
+ 
+-static unsigned char *
+-convert_line_plane(unsigned char *src,
+-		   unsigned char *dst,
+-		   unsigned int row,
+-		   unsigned int plane,
+-		   unsigned int pixels,
+-		   unsigned int size,
+-		   pdftoraster_doc_t *doc,
+-		   convert_cspace_func convertCSpace)
++//
++// 'convert_line_plane()' - processing a line of pixels, specifically when 
++// 			    output format is Planar
++//
++
++static unsigned char*					  // O - output line
++convert_line_plane(unsigned char *src,			// I - Source Pixel line
++		   unsigned char *dst,			// O - Destination Pixel Line
++		   unsigned int row,			// I - Row Index
++		   unsigned int plane,			// I - Plane Index
++		   unsigned int pixels,			// I - Number of Pixels
++		   unsigned int size,			// I - Size of Line
++		   pdftoraster_doc_t *doc,		// I - Document of output
++		   convert_cspace_func convertCSpace)	// I - CSpace
+ {
+   // Assumed that BitsPerColor is 8
+   for (unsigned int i = 0; i < pixels; i ++)
+@@ -1064,8 +1210,11 @@ convert_line_plane(unsigned char *src,
+   return (dst);
+ }
+ 
++//
++// 'convert_line_plane_swap()' - Callback to convert_line_plane
++//
+ 
+-static unsigned char *
++static unsigned char*
+ convert_line_plane_swap(unsigned char *src,
+ 			unsigned char *dst,
+ 			unsigned int row,
+@@ -1091,7 +1240,9 @@ convert_line_plane_swap(unsigned char *src,
+   return (dst);
+ }
+ 
+-// Handle special cases which appear in the Gutenprint driver
++//
++// 'select_special_case()' - Handle special cases which appear in the Gutenprint driver
++// 
+ static bool
+ select_special_case(pdftoraster_doc_t* doc,
+ 		    pdf_conversion_function_t* convert)
+@@ -1121,8 +1272,12 @@ select_special_case(pdftoraster_doc_t* doc,
+   return (false);
+ }
+ 
+-static unsigned int
+-get_cms_color_space_type(cmsColorSpaceSignature cs)
++//
++// 'get_cms_color_space_type()' - 
++//
++
++static unsigned int					  // O - simplified CSpace code
++get_cms_color_space_type(cmsColorSpaceSignature cs)	// I - CSpace 
+ {
+   switch (cs)
+   {
+@@ -1179,15 +1334,16 @@ get_cms_color_space_type(cmsColorSpaceSignature cs)
+   return (PT_RGB);
+ }
+ 
++//
++// 'select_convert_func()' - select convertLine function
++//
+ 
+-
+-// select convertLine function
+-static int
+-select_convert_func(cups_raster_t *raster,
+-		    pdftoraster_doc_t* doc,
+-		    pdf_conversion_function_t *convert,
+-		    cf_logfunc_t log,
+-		    void* ld)
++static int						  // O - Error Code
++select_convert_func(cups_raster_t *raster,		// I - CUPS Raster data
++		    pdftoraster_doc_t* doc,		// I - Conversion Document
++		    pdf_conversion_function_t *convert,	// I - convert function
++		    cf_logfunc_t log,			// I - log file for error/debug log
++		    void* ld)				// Void function
+ {
+   doc->bitspercolor = doc->header.cupsBitsPerColor;
+   if ((doc->colour_profile->colorProfile == NULL ||
+@@ -1367,144 +1523,201 @@ select_convert_func(cups_raster_t *raster,
+   return (0);
+ }
+ 
+-static int
+-read_pnm_header(FILE *img, unsigned int *width, unsigned int *height, unsigned int *maxval, char *magic)
++//
++// 'read_pnm_header()' - parse the information of a PNM (Portable Any Map) 
++// 			 image file
++//
++
++static int				  // O - error code
++read_pnm_header(FILE *img, 		// I - Pointer to PNM file
++		unsigned int *width, 	// I - Width of image
++		unsigned int *height, 	// I - Height of Image
++		unsigned int *maxval, 	// I - max value of each pixel smthing(TODO)
++		char *magic)		// I - magic number(compression level)
+ {
+-    char buffer[1024];
+-    int ch;
+-
+-    // Read magic number
+-    if (fgets(buffer, sizeof(buffer), img) == NULL) return 0;
+-    if (sscanf(buffer, "P%1c", magic) != 1) return 0;
+-
+-    // Skip comments
+-    while (1) {
+-        ch = fgetc(img);
+-        if (ch == '#') {
+-            // Skip comment line
+-            while ((ch = fgetc(img)) != EOF && ch != '\n');
+-        } else if (isspace(ch)) {
+-            continue;
+-        } else {
+-            ungetc(ch, img);
+-            break;
+-        }
+-    }
++  char buffer[1024];
++  int ch;
+ 
+-    // Read width and height
+-    if (fscanf(img, "%u %u", width, height) != 2) return 0;
++  // Read magic number
++  if (fgets(buffer, sizeof(buffer), img) == NULL) return 0;
++  if (sscanf(buffer, "P%1c", magic) != 1) return 0;
+ 
+-    // For PBM, maxval is implied (1)
+-    if (*magic == '4') {
+-        *maxval = 1;
+-        // Skip single whitespace after dimensions
+-        fgetc(img);
+-        return 1;
++  // Skip comments
++  while (1) 
++  {
++    ch = fgetc(img);
++    if (ch == '#') 
++    {
++      // Skip comment line
++      while ((ch = fgetc(img)) != EOF && ch != '\n');
++    } 
++    else if (isspace(ch)) 
++    {
++      continue;
++    } 
++    else 
++    {
++      ungetc(ch, img);
++      break;
+     }
++  }
+ 
+-    // Read maxval for PGM/PPM
+-    if (fscanf(img, "%u", maxval) != 1) return 0;
+-    // Skip single whitespace after maxval
+-    fgetc(img);
++  // Read width and height
++  if (fscanf(img, "%u %u", width, height) != 2) 
++    return 0;
+ 
++  // For PBM, maxval is implied (1)
++  if (*magic == '4') 
++  {
++    *maxval = 1;
++    // Skip single whitespace after dimensions
++    fgetc(img);
+     return 1;
++  }
++
++  // Read maxval for PGM/PPM
++  if (fscanf(img, "%u", maxval) != 1) 
++    return 0;
++  // Skip single whitespace after maxval
++  fgetc(img);
++
++  return 1;
+ }
+ 
+-// Read PBM data (1-bit)
+-static unsigned char *
+-read_pbm_data(FILE *img, unsigned int *rowsize, unsigned int width, unsigned int height)
++//
++// 'read_pbm_data()' - parse the information of the PBM(Portable Bitmap) file
++//
++
++static unsigned char*			  // O - parsed data of pbm file
++read_pbm_data(FILE *img, 		// I - Image file	
++	      unsigned int *rowsize, 	// O - Row size 
++	      unsigned int width, 	// I - width of Image
++	      unsigned int height)	// I - Height of Image
+ {
+-    *rowsize = (width + 7) / 8;
+-    size_t data_size = *rowsize * height;
+-    unsigned char *data = (unsigned char *)malloc(data_size);
+-
+-    if (!data) return NULL;
+-    if (fread(data, 1, data_size, img) != data_size) {
+-        free(data);
+-        return NULL;
+-    }
+-    return data;
++  *rowsize = (width + 7) / 8;
++  size_t data_size = *rowsize * height;
++  unsigned char *data = (unsigned char *)malloc(data_size);
++
++  if (!data) 
++    return NULL;
++  if (fread(data, 1, data_size, img) != data_size) 
++  {
++    free(data);
++    return NULL;
++  }
++  return data;
+ }
+ 
+-// Read PGM data (grayscale)
+-static unsigned char *
+-read_pgm_data(FILE *img, unsigned int *rowsize, unsigned int width, unsigned int height, unsigned int maxval)
++//
++// 'read_pgm_data()' - parse the information of the PBM(Portable Greymap) file
++//
++
++static unsigned char*			  // O - parsed data of pgm file
++read_pgm_data(FILE *img, 		// I - Image file
++	      unsigned int *rowsize, 	// O - Row Size
++	      unsigned int width, 	// I - width of Image
++	      unsigned int height, 	// I - height of Image
++	      unsigned int maxval)	// I - max value
+ {
+-    *rowsize = width;
+-    size_t data_size = width * height;
+-    unsigned char *data = (unsigned char *)malloc(data_size);
++  *rowsize = width;
++  size_t data_size = width * height;
++  unsigned char *data = (unsigned char *)malloc(data_size);
+ 
+-    if (!data) return NULL;
++  if (!data) return NULL;
+ 
+-    if (maxval <= 255) {
+-        if (fread(data, 1, data_size, img) != data_size) {
+-            free(data);
+-            return NULL;
+-        }
+-    } else {
+-        // Handle 16-bit (not common, but possible)
+-        unsigned short *temp = (unsigned short *)malloc(data_size * 2);
+-        if (!temp) {
+-            free(data);
+-            return NULL;
+-        }
+-        if (fread(temp, 2, data_size, img) != data_size) {
+-            free(temp);
+-            free(data);
+-            return NULL;
+-        }
+-        // Convert to 8-bit
+-        for (size_t i = 0; i < data_size; i++) {
+-            data[i] = temp[i] >> 8;  // Take MSB
+-        }
+-        free(temp);
++  if (maxval <= 255) 
++  {
++    if (fread(data, 1, data_size, img) != data_size) 
++    {
++      free(data);
++      return NULL;
+     }
+-    return data;
++  } 
++  else 
++  {
++    // Handle 16-bit (not common, but possible)
++    unsigned short *temp = (unsigned short *)malloc(data_size * 2);
++    if (!temp) 
++    {
++      free(data);
++      return NULL;
++    }
++    if (fread(temp, 2, data_size, img) != data_size) 
++    {
++      free(temp);
++      free(data);
++      return NULL;
++    }
++    // Convert to 8-bit
++    for (size_t i = 0; i < data_size; i++) 
++    {
++      data[i] = temp[i] >> 8;  // Take MSB
++    }
++    free(temp);
++  }
++  return data;
+ }
+ 
+-// Read PPM data (color)
+-static unsigned char *
+-read_ppm_data(FILE *img, unsigned int *rowsize, unsigned int width, unsigned int height, unsigned int maxval)
++//
++// 'read_ppm_data()' - parse the information of the PBM(Portable Pixmap) file
++//
++
++static unsigned char*			  // O - ppm file data
++read_ppm_data(FILE *img, 		// I - Image file
++	      unsigned int *rowsize, 	// O - size of Row
++	      unsigned int width, 	// I - width of image
++	      unsigned int height, 	// I - height of image
++	      unsigned int maxval)	// I - maximum value
+ {
+-    *rowsize = width * 3;
+-    size_t data_size = width * height * 3;
+-    unsigned char *data = (unsigned char *)malloc(data_size);
++  *rowsize = width * 3;
++  size_t data_size = width * height * 3;
++  unsigned char *data = (unsigned char *)malloc(data_size);
+ 
+-    if (!data) return NULL;
++  if (!data) return NULL;
+ 
+-    if (maxval <= 255) {
+-        if (fread(data, 1, data_size, img) != data_size) {
+-            free(data);
+-            return NULL;
+-        }
+-    } else {
+-        // Handle 16-bit (not common, but possible)
+-        unsigned short *temp = (unsigned short *)malloc(data_size * 2);
+-        if (!temp) {
+-            free(data);
+-            return NULL;
+-        }
+-        if (fread(temp, 2, data_size, img) != data_size) {
+-            free(temp);
+-            free(data);
+-            return NULL;
+-        }
+-        // Convert to 8-bit
+-        for (size_t i = 0; i < data_size; i++) {
+-            data[i] = temp[i] >> 8;  // Take MSB
+-        }
+-        free(temp);
++  if (maxval <= 255) 
++  {
++    if (fread(data, 1, data_size, img) != data_size) 
++    {
++      free(data);
++      return NULL;
+     }
+-    return data;
++  } 
++  else 
++  {
++    // Handle 16-bit (not common, but possible)
++    unsigned short *temp = (unsigned short *)malloc(data_size * 2);
++    if (!temp) 
++    {
++      free(data);
++      return NULL;
++    }
++    if (fread(temp, 2, data_size, img) != data_size) 
++    {
++      free(temp);
++      free(data);
++      return NULL;
++    }
++    // Convert to 8-bit
++    for (size_t i = 0; i < data_size; i++) 
++    {
++      data[i] = temp[i] >> 8;  // Take MSB
++    }
++    free(temp);
++  }
++  return data;
+ }
+ 
++// 
++// 'write_page_image()' - bridge between PDF rendering tool and CUPS raster Output
++//
+ 
+-static void
+-write_page_image(cups_raster_t *raster,
+-                 pdftoraster_doc_t *doc,
+-                 int pageNo,
+-                 pdf_conversion_function_t* convert,
+-                 float overspray_factor,
++static void			
++write_page_image(cups_raster_t *raster,			// I - Cups raster output data struct
++                 pdftoraster_doc_t *doc,		// I - Document about attributes
++                 int pageNo,				// I - page Number to Output
++                 pdf_conversion_function_t* convert,	// I - conversion rules
++                 float overspray_factor,		// I - used for borderless printing
+                  cf_filter_iscanceledfunc_t iscanceled,
+                  void *icd)
+ {
+@@ -1755,19 +1968,23 @@ write_page_image(cups_raster_t *raster,
+       }
+     }
+   }
+-  free(colordata);
+ 
++  free(colordata);
+ }
+ 
+-static int
+-out_page(pdftoraster_doc_t *doc,
+-         int pageNo,
+-         cf_filter_data_t *data,
+-         cups_raster_t *raster,
+-         pdf_conversion_function_t *convert,
+-         cf_logfunc_t log,
++//
++// 'out_page()' - processing a single PDF page
++//
++
++static int					  // O - error code
++out_page(pdftoraster_doc_t *doc,		// I - conversion attributes
++         int pageNo,				// I - Page number to convert
++         cf_filter_data_t *data,		// I - filter Data
++         cups_raster_t *raster,			// I - raster data structure
++         pdf_conversion_function_t *convert,	// I - conversion function
++         cf_logfunc_t log,			// I - log function
+          void* ld,
+-         cf_filter_iscanceledfunc_t iscanceled,
++         cf_filter_iscanceledfunc_t iscanceled,	
+          void *icd)
+ {
+   double rotate = 0;
+@@ -1781,7 +1998,7 @@ out_page(pdftoraster_doc_t *doc,
+   if (iscanceled && iscanceled(icd))
+     return (0);
+ 
+-  pdfio_obj_t *pdf_Page = pdfioFileGetPage(doc->poppler_doc, pageNo - 1); 
++  pdfio_obj_t *pdf_Page = pdfioFileGetPage(doc->pdf_doc, pageNo - 1); 
+   pdfio_dict_t *pdf_Page_dict = pdfioObjGetDict(pdf_Page);
+ 
+   pdfio_rect_t cropBox;
+@@ -1819,11 +2036,13 @@ out_page(pdftoraster_doc_t *doc,
+   // Maximum allowed page size for PDF is 200x200 inches (~ 5x5 m), or 14400x14400 pt
+   // https://community.adobe.com/t5/indesign-discussions/maximum-width-of-a-pdf/td-p/9217372
+   //
+-  if (doc->header.cupsPageSize[0] > 14400) {
++  if (doc->header.cupsPageSize[0] > 14400) 
++  {
+     fprintf(stderr, "ERROR: Page width is %.2fpt, too large, cropping to 14400pt\n", doc->header.cupsPageSize[0]);
+     doc->header.cupsPageSize[0] = 14400;
+   }
+-  if (doc->header.cupsPageSize[1] > 14400) {
++  if (doc->header.cupsPageSize[1] > 14400) 
++  {
+     fprintf(stderr, "ERROR: Page height is %.2fpt, too large, cropping to 14400pt\n", doc->header.cupsPageSize[1]);
+     doc->header.cupsPageSize[1] = 14400;
+   }
+@@ -2108,6 +2327,9 @@ set_color_profile(pdftoraster_doc_t *doc,
+   return (0);
+ }
+ 
++//
++// 'cfFilterPDFToRaster()' - Main Function for PDFtoRaster Conversion
++//
+ 
+ int
+ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+@@ -2118,6 +2340,7 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+                     void *parameters)       // I - Filter-specific parameters
+                                             //     (unused)
+ {
++  // Constants for Printing Attributes or data
+   const char                 *val;
+   cf_filter_out_format_t     outformat;
+   pdftoraster_doc_t          doc;
+@@ -2144,7 +2367,8 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+     
+   val = data->final_content_type;
+     
+-  
++  // Fixing output type to PWG/URF/PCLM format if none of them, 
++  // then default is CUPS_RASTER
+   if (val)
+   {
+     if (strcasestr(val, "pwg"))
+@@ -2168,11 +2392,10 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+                "cfFilterPDFToRaster: Final output format: %s",
+                (outformat == CF_FILTER_OUT_FORMAT_CUPS_RASTER ? "CUPS Raster" :
+                 (outformat == CF_FILTER_OUT_FORMAT_PWG_RASTER ? "PWG Raster" :
+-                 (outformat == CF_FILTER_OUT_FORMAT_APPLE_RASTER ?
+-                  "Apple Raster" :
++                 (outformat == CF_FILTER_OUT_FORMAT_APPLE_RASTER ?  "Apple Raster" :
+                   "PCLm"))));
+ 
+-    //
++  //
+   // Open the input data stream specified by inputfd ...
+   //
+ 
+@@ -2219,6 +2442,7 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+   }
+   close(fd);
+ 
++  // get Printing/conversion Attributes
+   if (parse_opts(data, &outformat, &doc) == 1)
+   {
+     unlink(name);
+@@ -2226,7 +2450,7 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+   }
+ 
+   doc.input_filename = strdup(name);
+-  doc.poppler_doc = pdfioFileOpen(name, NULL, NULL, NULL, NULL);
++  doc.pdf_doc = pdfioFileOpen(name, NULL, NULL, NULL, NULL);
+ 
+   FILE *fp;
+   if ((fp = fdopen(inputfd, "rb")) == 0)
+@@ -2237,11 +2461,12 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+     goto out;
+   }
+ 
++  // parse PDF Header of PDF file for Important comments
+   parse_pdftopdf_comment(fp, &deviceCopies, &deviceCollate);
+   fclose(fp);
+ 
+-  if(doc.poppler_doc != NULL)
+-    npages = pdfioFileGetNumPages(doc.poppler_doc);
++  if(doc.pdf_doc != NULL)
++    npages = pdfioFileGetNumPages(doc.pdf_doc);
+   
+   // fix NumCopies, Collate ccording to PDFTOPDFComments
+   doc.header.NumCopies = deviceCopies;
+@@ -2250,7 +2475,8 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+   doc.header.MirrorPrint = CUPS_FALSE;
+   doc.header.Orientation = CUPS_ORIENT_0;
+ 
+-    if (doc.header.cupsBitsPerColor != 1 &&
++  // check if Bits Per Color requested is supported
++  if (doc.header.cupsBitsPerColor != 1 &&
+       doc.header.cupsBitsPerColor != 2 &&
+       doc.header.cupsBitsPerColor != 4 &&
+       doc.header.cupsBitsPerColor != 8 &&
+@@ -2330,7 +2556,8 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+         ret = 1;
+         goto out;
+   }
+-    if (!(doc.colour_profile->cm_disabled))
++
++  if (!(doc.colour_profile->cm_disabled))
+   {
+     if (set_color_profile(&doc, log, ld) != 0)
+     {
+@@ -2377,7 +2604,7 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+     ret = 1;
+     goto out;
+   }
+-  if (doc.poppler_doc != NULL)
++  if (doc.pdf_doc != NULL)
+   {
+     for (i = 1; i <= npages; i ++)
+     {
+@@ -2412,18 +2639,3 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+ 
+   return (ret);
+ }
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-  
+-
+- 
+-
+-
+diff --git a/cupsfilters/pwgtopdf.c b/cupsfilters/pwgtopdf.c
+index 16efb727..747c472a 100644
+--- a/cupsfilters/pwgtopdf.c
++++ b/cupsfilters/pwgtopdf.c
+@@ -5,13 +5,12 @@
+ // Copyright 2012 by Tobias Hoffmann
+ // Copyright 2014-2022 by Till Kamppeter
+ // Copyright 2017 by Sahil Arora
+-// Copyright 2024-2025 by Uddhav Phatak <uddhavphatak@gmail.com>
++// Copyright 2024-2026 by Uddhav Phatak <uddhavphatak@gmail.com>
+ //
+ // Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ // information.
+ //
+ 
+-
+ #include <config.h>
+ 
+ #include <sys/types.h>
+@@ -115,7 +114,7 @@ typedef struct pwgtopdf_doc_s                  // **** Document information ****
+ 					       // function, can be NULL
+ } pwgtopdf_doc_t;
+ 
+-
++// PDF info structure
+ struct pdf_info{
+     pdfio_file_t *pdf;
+     pdfio_dict_t *page_dict;
+@@ -161,6 +160,10 @@ struct pdf_info{
+     cf_filter_out_format_t outformat;
+ };
+ 
++//
++// 'init_pdf_info()' - initialise pwgtopdf conversion doc
++//
++
+ void 
+ init_pdf_info(struct pdf_info *info) 
+ {
+@@ -212,7 +215,10 @@ init_pdf_info(struct pdf_info *info)
+ typedef void (*pdf_convert_function)(struct pdf_info *info,
+ 				     pwgtopdf_doc_t *doc);
+ 
+-// Freeing the dynamically allocated memory
++// 
++// 'free_pdf_info()' - Freeing the dynamically allocated memory
++//
++
+ void free_pdf_info(struct pdf_info *info)
+ {
+   if (info->pclm_strip_height)
+@@ -252,7 +258,6 @@ void free_pdf_info(struct pdf_info *info)
+     info->render_intent = NULL;
+   }
+ 
+-
+   if (info->page_data)
+   {
+     free(info->page_data);
+@@ -264,10 +269,10 @@ void free_pdf_info(struct pdf_info *info)
+ // Bit conversion functions
+ //
+ 
+-static unsigned char *
+-invert_bits(unsigned char *src,
+-	    unsigned char *dst,
+-	    unsigned int pixels)
++static unsigned char*			  // O - output string of pixels
++invert_bits(unsigned char *src,		// I - source chars	
++	    unsigned char *dst,		// O - destination chars
++	    unsigned int pixels)	// I - pixels
+ { 
+   unsigned int i;
+ 
+@@ -279,10 +284,10 @@ invert_bits(unsigned char *src,
+ }	
+ 
+ 
+-static unsigned char *
+-no_bit_conversion(unsigned char *src,
+-		  unsigned char *dst,
+-		  unsigned int pixels)
++static unsigned char*			  // O - Output string of bits
++no_bit_conversion(unsigned char *src,	// I - Source chars
++		  unsigned char *dst,  	// O - destination chars	
++		  unsigned int pixels)	// I - Pixesl
+ {
+   return (src);
+ }
+@@ -292,7 +297,7 @@ no_bit_conversion(unsigned char *src,
+ // Color conversion functions
+ //
+ 
+-static unsigned char *
++static unsigned char*			
+ rgb_to_cmyk(unsigned char *src,
+ 	    unsigned char *dst,
+ 	    unsigned int pixels)
+@@ -302,7 +307,7 @@ rgb_to_cmyk(unsigned char *src,
+ }
+ 
+ 
+-static unsigned char *
++static unsigned char*
+ white_to_cmyk(unsigned char *src,
+ 	      unsigned char *dst,
+ 	      unsigned int pixels)
+@@ -311,8 +316,7 @@ white_to_cmyk(unsigned char *src,
+   return (dst);
+ }
+ 
+-
+-static unsigned char *
++static unsigned char*
+ cmyk_to_rgb(unsigned char *src,
+ 	    unsigned char *dst,
+ 	    unsigned int pixels)
+@@ -322,7 +326,7 @@ cmyk_to_rgb(unsigned char *src,
+ }
+ 
+ 
+-static unsigned char *
++static unsigned char*
+ white_to_rgb(unsigned char *src,
+ 	     unsigned char *dst,
+ 	     unsigned int pixels)
+@@ -332,7 +336,7 @@ white_to_rgb(unsigned char *src,
+ }
+ 
+ 
+-static unsigned char *
++static unsigned char*
+ rgb_to_white(unsigned char *src,
+ 	     unsigned char *dst,
+ 	     unsigned int pixels)
+@@ -342,7 +346,7 @@ rgb_to_white(unsigned char *src,
+ }
+ 
+ 
+-static unsigned char *
++static unsigned char*
+ cmyk_to_white(unsigned char *src,
+ 	      unsigned char *dst,
+ 	      unsigned int pixels)
+@@ -352,7 +356,7 @@ cmyk_to_white(unsigned char *src,
+ }
+ 
+ 
+-static unsigned char *
++static unsigned char*
+ no_color_conversion(unsigned char *src,
+ 		    unsigned char *dst,
+ 		    unsigned int pixels)
+@@ -486,6 +490,10 @@ int_to_fwstring(int n,
+   return result;
+ }
+ 
++//
++// 'create_pdf_file()' - create temporar PDF file for output
++//
++
+ static int
+ create_pdf_file(struct pdf_info *info,
+                 cf_filter_out_format_t outformat,
+-- 
+2.53.0
+

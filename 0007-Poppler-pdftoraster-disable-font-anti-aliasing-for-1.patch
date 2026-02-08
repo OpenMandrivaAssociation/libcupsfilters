@@ -1,0 +1,36 @@
+From 98260f38decbf8c00dee8bad720a5c08f685300a Mon Sep 17 00:00:00 2001
+From: ValdikSS <iam@valdikss.org.ru>
+Date: Mon, 26 May 2025 16:53:05 +0300
+Subject: [PATCH 07/33] Poppler pdftoraster: disable font anti-aliasing for
+ 1-bit mono output
+
+pdftoraster doesn't use Poppler mono renderer (and dithering),
+rendering everything into grayscale and converting to 1-bit with
+cfOneBitLine.
+
+Disable font anti-aliasing when the output is 1-bit, as
+fonts look better with anti-aliasing disabled in this case.
+---
+ cupsfilters/pdftoraster.cxx | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
+index 3b50030a..6771da82 100644
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
+@@ -1420,7 +1420,11 @@ write_page_image(cups_raster_t *raster,
+   poppler::page *current_page = doc->poppler_doc->create_page(pageNo - 1);
+   poppler::page_renderer pr;
+   pr.set_render_hint(poppler::page_renderer::antialiasing, true);
+-  pr.set_render_hint(poppler::page_renderer::text_antialiasing, true);
++  // text anti-aliasing for 1-bit color produces jagged text
++  if (doc->header.cupsBitsPerColor != 1)
++    pr.set_render_hint(poppler::page_renderer::text_antialiasing, true);
++  else
++    pr.set_render_hint(poppler::page_renderer::text_antialiasing, false);
+ 
+   // Overspray borderless page size: If the dimensions of the page
+   // size are up to 10% larger than the ones of the input page, zoom
+-- 
+2.53.0
+

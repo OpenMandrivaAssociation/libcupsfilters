@@ -1,0 +1,23 @@
+From 70ac1efaea615343e4ec349c14aa009811f32754 Mon Sep 17 00:00:00 2001
+From: Sertonix <sertonix@posteo.net>
+Date: Wed, 1 Oct 2025 13:41:32 +0000
+Subject: [PATCH 18/33] Use /bin/sh for testfilters.sh to avoid dependency on
+ bash (#67)
+
+---
+ cupsfilters/testfilters.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cupsfilters/testfilters.sh b/cupsfilters/testfilters.sh
+index e51c69e1..746b0c72 100755
+--- a/cupsfilters/testfilters.sh
++++ b/cupsfilters/testfilters.sh
+@@ -1,4 +1,4 @@
+-#!/bin/bash
++#!/bin/sh
+ 
+ echo "Test-Suite for Libcupsfilters"
+ #Now run the executable file with test case
+-- 
+2.53.0
+

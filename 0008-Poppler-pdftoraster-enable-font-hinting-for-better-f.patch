@@ -1,0 +1,27 @@
+From a8916f487725afedd289076e72df4d563f17f967 Mon Sep 17 00:00:00 2001
+From: ValdikSS <iam@valdikss.org.ru>
+Date: Mon, 26 May 2025 16:52:36 +0300
+Subject: [PATCH 08/33] Poppler pdftoraster: enable font hinting for better
+ fonts
+
+Some fonts a slightly not-pixel-perfect in 1-bit mono mode
+without hinting, so enable it.
+---
+ cupsfilters/pdftoraster.cxx | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
+index 6771da82..40e16e36 100644
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
+@@ -1420,6 +1420,7 @@ write_page_image(cups_raster_t *raster,
+   poppler::page *current_page = doc->poppler_doc->create_page(pageNo - 1);
+   poppler::page_renderer pr;
+   pr.set_render_hint(poppler::page_renderer::antialiasing, true);
++  pr.set_render_hint(poppler::page_renderer::text_hinting, true);
+   // text anti-aliasing for 1-bit color produces jagged text
+   if (doc->header.cupsBitsPerColor != 1)
+     pr.set_render_hint(poppler::page_renderer::text_antialiasing, true);
+-- 
+2.53.0
+

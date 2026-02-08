@@ -1,0 +1,36 @@
+From 7509668e5d1284da159b709ca613df57c3561836 Mon Sep 17 00:00:00 2001
+From: Till Kamppeter <till.kamppeter@gmail.com>
+Date: Wed, 16 Apr 2025 19:41:42 +0200
+Subject: [PATCH 04/33] cfFilterChain(): Initialize return value to 0
+
+In some cases the function exits with non-zero status if all filters
+exit with no errors (zero status). This was caused by the return value
+not being initialized to zero.
+---
+ cupsfilters/filter.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/cupsfilters/filter.c b/cupsfilters/filter.c
+index 1e4ae12c..84bf4f0b 100644
+--- a/cupsfilters/filter.c
++++ b/cupsfilters/filter.c
+@@ -653,6 +653,8 @@ cfFilterChain(int inputfd,         // I - File descriptor input stream
+   // Remove NULL filters...
+   //
+ 
++  retval = 0;
++
+   for (filter = (cf_filter_filter_in_chain_t *)cupsArrayGetFirst(filter_chain);
+        filter;
+        filter = (cf_filter_filter_in_chain_t *)cupsArrayGetNext(filter_chain))
+@@ -678,7 +680,6 @@ cfFilterChain(int inputfd,         // I - File descriptor input stream
+   {
+     if (log) log(ld, CF_LOGLEVEL_INFO,
+ 		 "cfFilterChain: No filter at all in chain, passing through the data.");
+-    retval = 0;
+     while ((bytes = read(inputfd, buf, sizeof(buf))) > 0)
+       if (write(outputfd, buf, bytes) < bytes)
+       {
+-- 
+2.53.0
+

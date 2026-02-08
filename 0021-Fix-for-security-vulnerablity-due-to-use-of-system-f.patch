@@ -1,0 +1,250 @@
+From 947d2250b3a5463937cde17dd934d37f327b9fa6 Mon Sep 17 00:00:00 2001
+From: ThePhatak <111195860+uddhavphatak@users.noreply.github.com>
+Date: Mon, 3 Nov 2025 01:32:04 +0530
+Subject: [PATCH 21/33] Fix for security vulnerablity due to use of system()
+ function (#103)
+
+* Fix for security vulnerablity due to use of system() function for e.g. SQL injecting.
+  Thus, replaced the approach with fork() and execv()
+* No hardcoding the pdftoppm path
+* CI install for pdftoppm
+---
+ .github/workflows/build.yaml |   1 +
+ configure.ac                 |  29 +++++++-
+ cupsfilters/pdftoraster.c    | 140 ++++++++++++++++++++++++++++-------
+ 3 files changed, 141 insertions(+), 29 deletions(-)
+
+diff --git a/.github/workflows/build.yaml b/.github/workflows/build.yaml
+index 7488f2c8..b5bbff25 100644
+--- a/.github/workflows/build.yaml
++++ b/.github/workflows/build.yaml
+@@ -42,6 +42,7 @@ jobs:
+       run: |
+        sudo apt install libpoppler-cpp-dev libpython3-dev libdbus-1-dev
+        sudo apt install mupdf-tools
++       sudo apt install -y poppler-utils
+        
+     - name: Install ghostscript
+       run: sudo apt install ghostscript
+diff --git a/configure.ac b/configure.ac
+index 48c291fa..9c074e16 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -388,7 +388,7 @@ AC_ARG_WITH([ippfind-path],
+ 
+ CUPS_GHOSTSCRIPT=""
+ AS_IF([test "x$enable_ghostscript" != "xyes"], [
+-       with_gs_path=""
++      with_gs_path=""
+ ], [
+ 	AS_IF([test "x$with_gs_path" != "xsystem"], [
+ 		CUPS_GHOSTSCRIPT="$with_gs_path"
+@@ -407,6 +407,33 @@ AS_IF([test "x$enable_ghostscript" != "xyes"], [
+ AM_CONDITIONAL(ENABLE_GHOSTSCRIPT, test "x$enable_ghostscript" = xyes)
+ AC_SUBST(CUPS_GHOSTSCRIPT)
+ 
++# ====================
++# Check for pdftoppm
++# ====================
++AC_ARG_WITH([pdftoppm-path],
++	[AS_HELP_STRING([--with-pdftoppm-path=value], [Set path to pdftoppm binary (default: system).])],
++       	[with_pdftoppm_path="$withval"],
++       	[with_pdftoppm_path=system]
++)
++
++PDFTOPPM_COMMAND=""
++AS_IF([test "x$with_pdftoppm_path" != "xsystem"], [
++      PDFTOPPM_COMMAND="$with_pdftoppm_path"
++], [
++	AS_IF([test "x$cross_compiling" = "xyes"], [
++		PDFTOPPM_COMMAND="pdftoppm"
++	], [
++		AC_CHECK_PROG(PDFTOPPM_COMMAND, pdftoppm, pdftoppm) 
++	])
++])
++
++AS_IF([test "x$PDFTOPPM_COMMAND" = "x"], [
++	AC_MSG_ERROR([Required pdftoppm binary is missing. Please install poppler-utils package.])
++])
++
++AC_DEFINE_UNQUOTED([PDFTOPPM_COMMAND], ["$PDFTOPPM_COMMAND"], [Full path to pdftoppm executable])
++AC_SUBST(PDFTOPPM_COMMAND)
++
+ # ================
+ # Check for mutool
+ # ================
+diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+index 2b5e290f..fca1b486 100644
+--- a/cupsfilters/pdftoraster.c
++++ b/cupsfilters/pdftoraster.c
+@@ -29,6 +29,9 @@
+ #include <cupsfilters/bitmap.h>
+ #include <strings.h>
+ #include <math.h>
++#include <unistd.h>
++#include <sys/wait.h>
++#include <fcntl.h>
+ 
+ #include <pdfio.h>
+ #include <pdfio-content.h>
+@@ -1522,40 +1525,122 @@ write_page_image(cups_raster_t *raster,
+   char img_path[] = "/tmp/tempimg_XXXXXX";
+   int fd_img = mkstemp(img_path);
+   close(fd_img); // We just need the filename
+-  
+-  char command[1024];
++ 
++  int ret;		// exit status
++  pid_t pid = fork();	// child process
+ 
++  if (pid == -1)	// fork failed
++  {
++    if (doc->logfunc) doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                                   "Failed to fork process for pdftoppm");
++    unlink(img_path);
++    return;
++  }
+ 
+-  switch (doc->header.cupsColorSpace) 
++  if (pid == 0)
+   {
+-    case CUPS_CSPACE_W:
+-    case CUPS_CSPACE_K:
+-    case CUPS_CSPACE_SW:
+-      if (doc->header.cupsBitsPerColor == 1) 
+-      {
+-        snprintf(command, sizeof(command),
+-                 "pdftoppm -rx %d -ry %d -f %d -l %d -mono '%s' > '%s'",
+-                 fakeres[0], fakeres[1], pageNo, pageNo, doc->input_filename, img_path);
+-      } 
+-      else 
+-      {
+-        snprintf(command, sizeof(command),
+-                 "pdftoppm -rx %d -ry %d -f %d -l %d -gray '%s' > '%s'",
+-                 fakeres[0], fakeres[1], pageNo, pageNo, doc->input_filename, img_path);
+-      }
+-      break;
+-    default:
+-      snprintf(command, sizeof(command),
+-               "pdftoppm -rx %d -ry %d -f %d -l %d '%s' > '%s'",
+-	       fakeres[0], fakeres[1], pageNo, pageNo, doc->input_filename, img_path);
+-      break;
+-  } 
++    // --- CHILD PROCESS ---
++
++    // We build argv for execv.
++    // First, convert numbers to strings.
++    char rx_str[16];
++    char ry_str[16];
++    char page_str[16];
++    snprintf(rx_str, sizeof(rx_str), "%d", fakeres[0]);
++    snprintf(ry_str, sizeof(ry_str), "%d", fakeres[1]);
++    snprintf(page_str, sizeof(page_str), "%d", pageNo);
++
++    // Open the output file
++    int out_fd = open(img_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
++    if (out_fd == -1)
++    {
++      // Use _exit() in child process for safety
++      if (doc->logfunc) doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                                     "pdftoraster: Failed to open output file %s", img_path);
++      _exit(127);
++    }
++    
++    // Redirect stdout (file descriptor 1) to our file
++    if (dup2(out_fd, 1) == -1)
++    {
++      if (doc->logfunc) doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                                     "pdftoraster: Failed to redirect stdout (dup2)");
++      _exit(127);
++    }
++    close(out_fd); // We don't need this descriptor anymore
++
++    // Building the argument list (argv)
++    // Needs to be NULL-terminated. Max 12 args:
++    // pdftoppm, -rx, N, -ry, N, -f, N, -l, N, [-mono|-gray], file, NULL
++    char *argv[12];
++    int arg_index = 0;
++
++    argv[arg_index++] = "pdftoppm";
++    argv[arg_index++] = "-rx";
++    argv[arg_index++] = rx_str;
++    argv[arg_index++] = "-ry";
++    argv[arg_index++] = ry_str;
++    argv[arg_index++] = "-f";
++    argv[arg_index++] = page_str;
++    argv[arg_index++] = "-l";
++    argv[arg_index++] = page_str;
++
++    // Add the dynamic color space argument
++    switch (doc->header.cupsColorSpace)
++    {
++      case CUPS_CSPACE_W:
++      case CUPS_CSPACE_K:
++      case CUPS_CSPACE_SW:
++        if (doc->header.cupsBitsPerColor == 1)
++        {
++          argv[arg_index++] = "-mono";
++        }
++        else
++        {
++          argv[arg_index++] = "-gray";
++        }
++        break;
++      default:
++        // No extra argument needed for color
++        break;
++    }
++
++    // Add the final arguments
++    argv[arg_index++] = doc->input_filename; // The input PDF
++    argv[arg_index++] = NULL;                // End of the array
++
++    // Define the path and call execv
++    const char *pathname = PDFTOPPM_COMMAND;
++    execv(pathname, argv);
+ 
+-  int ret = system(command);
++    // If execv returns, an error occurred
++    if (doc->logfunc) doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                                     "pdftoraster: Failed to execute %s", pathname); 
++    _exit(127); 
++  }
++  else
++  {
++    // --- PARENT PROCESS ---
++    int status;
++
++    // Wait for the child process to finish
++    waitpid(pid, &status, 0);
++
++    // Get the child's exit status
++    if (WIFEXITED(status))
++    {
++      ret = WEXITSTATUS(status); // This is the equivalent of system()'s return
++    }
++    else
++    {
++      ret = -1; // Indicate abnormal termination
++    }
++  }
++  
+   if (ret != 0) 
+   {
+     if (doc->logfunc) doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
+-                                   "pdftoppm command failed (exit status %d): %s", ret, command);
++                                   "pdftoppm command failed (exit status %d)", ret);
+     unlink(img_path);
+     return;
+   }
+@@ -2282,7 +2367,6 @@ cfFilterPDFToRaster(int inputfd,            // I - File descriptor input stream
+   {
+     for (i = 1; i <= npages; i ++)
+     {
+-      fprintf(stderr, "%ld %s all going well++++++++++\n", npages, name);
+       if (out_page(&doc, i, data, raster, &convert, log, ld, iscanceled,
+                    icd) == 1)
+       {
+-- 
+2.53.0
+

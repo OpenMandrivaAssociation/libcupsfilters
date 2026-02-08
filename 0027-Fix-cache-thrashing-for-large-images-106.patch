@@ -1,0 +1,34 @@
+From a02c49054ff828772b9edea083a3fe58e90e9b15 Mon Sep 17 00:00:00 2001
+From: Jon Howell <jonhnet@users.noreply.github.com>
+Date: Mon, 8 Dec 2025 11:36:01 -0800
+Subject: [PATCH 27/33] Fix cache thrashing for large images (#106)
+
+cfImageCrop constructs a new image with the default tile cache
+size. This create disastrously bad performance on large images.
+
+For example, calling imagetoraster on an ARCHE sized page (36x48 inches,
+21600 pixels wide) takes over 300s before this patch, all of which is in
+libc_read and libc_write. The cache size is 10 tiles, but the required
+cache size is actually about 900-1000 tiles.  With the patch, the temp
+image correctly inherits a bigger cache (that was sized using the image
+width), and that same invocation costs 40s.
+---
+ cupsfilters/image.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cupsfilters/image.c b/cupsfilters/image.c
+index f53af1e9..c5f13bba 100644
+--- a/cupsfilters/image.c
++++ b/cupsfilters/image.c
+@@ -653,7 +653,7 @@ cfImageCrop(cf_image_t* img,
+   cf_ib_t *pixels = (cf_ib_t*)malloc(img->xsize * cfImageGetDepth(img));
+ 
+   temp->cachefile = -1;
+-  temp->max_ics = CF_TILE_MINIMUM;
++  temp->max_ics = img->max_ics;
+   temp->colorspace = img->colorspace;
+   temp->xppi = img->xppi;
+   temp->yppi = img->yppi;
+-- 
+2.53.0
+

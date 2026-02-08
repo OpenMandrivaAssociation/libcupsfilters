@@ -1,0 +1,435 @@
+From 5894f700c14467a77fefdf78a29360a0d14704e3 Mon Sep 17 00:00:00 2001
+From: Giuseppe Massaro <giuse.massaro@gmail.com>
+Date: Wed, 5 Nov 2025 18:33:25 +0100
+Subject: [PATCH 22/33] Fix PCLm strip overflow and add regression test (#105)
+
+---
+ Makefile.am                       |   8 +-
+ cupsfilters/pwgtopdf.c            |  95 +++++++-----
+ cupsfilters/test-pclm-overflow.sh | 241 ++++++++++++++++++++++++++++++
+ 3 files changed, 303 insertions(+), 41 deletions(-)
+ create mode 100755 cupsfilters/test-pclm-overflow.sh
+
+diff --git a/Makefile.am b/Makefile.am
+index 6c99693c..0c0daa80 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -26,6 +26,7 @@ EXTRA_DIST = \
+ 	pdf.utf-8.simple.in
+ 
+ EXTRA_DIST += \
++	cupsfilters/test-pclm-overflow.sh \
+ 	data/makePDFfromPS.sh \
+ 	data/classified.ps \
+ 	data/confidential.ps \
+@@ -93,7 +94,9 @@ pkgfiltersinclude_DATA = \
+ 
+ lib_LTLIBRARIES = libcupsfilters.la
+ 
+-check_SCRIPTS = cupsfilters/testfilters.sh
++check_SCRIPTS = \
++	cupsfilters/testfilters.sh \
++	cupsfilters/test-pclm-overflow.sh
+ 
+ check_PROGRAMS = \
+ 	testcmyk \
+@@ -115,7 +118,8 @@ TESTS = \
+ 	test-analyze \
+ 	test-pdf \
+ 	test-ps \
+-	cupsfilters/testfilters.sh
++	cupsfilters/testfilters.sh \
++	cupsfilters/test-pclm-overflow.sh
+ 
+ #	testcmyk # fails as it opens some image.ppm which is nowerhe to be found.
+ #	testimage # requires also some ppm file as argument
+diff --git a/cupsfilters/pwgtopdf.c b/cupsfilters/pwgtopdf.c
+index 3b54f1dc..16efb727 100644
+--- a/cupsfilters/pwgtopdf.c
++++ b/cupsfilters/pwgtopdf.c
+@@ -1199,57 +1199,61 @@ finish_page(struct pdf_info *info,
+   }
+ 
+   // Draw it
+-  char *content;
+-  int content_size;
+-  content_size = 768;  // Enough for 2 doubles and commands
+-  content = (char*)malloc(content_size);
+-    
+   if(info->outformat == CF_FILTER_OUT_FORMAT_PDF)
+   {
+-    snprintf(content, 256, 
+-             "q\n%.2f 0 0 %.2f 0 0 cm\n/I Do\niQ\n",
+-              info->page_width, info->page_height);
++    char transform_cmd[256];
++    int bytes = snprintf(transform_cmd, sizeof(transform_cmd),
++                         "q\n%.2f 0 0 %.2f 0 0 cm\n/I Do\niQ\n",
++                         info->page_width, info->page_height);
++    if (bytes < 0 || bytes >= (int)sizeof(transform_cmd) ||
++        !pdfioStreamWrite(info->page_stream, transform_cmd, (size_t)bytes))
++      goto draw_error;
+   }
+   else if(info->outformat == CF_FILTER_OUT_FORMAT_PCLM)
+   {
+-    char *endptr;
+-    long resolution_integer = strtol(info->pclm_source_resolution_default, &endptr, 10);
+-    
+-    double d = 72.0 / (double)resolution_integer;  // 72 points per inch
+-    
+-    char scale_cmd[256];
+-    snprintf(scale_cmd, sizeof(scale_cmd), "%.2f 0 0 %.2f 0 0 cm\n", d, d);
+-    strcat(content, scale_cmd);
+-
+-    unsigned yAnchor = info->height;
++    const char *resolution = info->pclm_source_resolution_default;
++    char scale_cmd[64];
+     char strip_cmd[512];
+-    
++    int id_width = num_digits(info->pclm_num_strips - 1);
++    unsigned yAnchor = info->height;
++    if (!resolution || !*resolution)
++      resolution = "300";
++    long resolution_integer = strtol(resolution, NULL, 10);
++    if (resolution_integer <= 0)
++      resolution_integer = 300;
++    double d = 72.0 / (double)resolution_integer;
++    int bytes = snprintf(scale_cmd, sizeof(scale_cmd), "%.2f 0 0 %.2f 0 0 cm\n", d, d);
++    if (bytes < 0 || bytes >= (int)sizeof(scale_cmd) ||
++        !pdfioStreamWrite(info->page_stream, scale_cmd, (size_t)bytes))
++      goto draw_error;
+     for (unsigned i = 0; i < info->pclm_num_strips; i++)
+     {
+       yAnchor -= info->pclm_strip_height[i];
+-        
+-      snprintf(strip_cmd, sizeof(strip_cmd),
+-               "/P <</MCID 0>> BDC q\n"
+-	       "%u 0 0 %u 0 %u cm\n"
+-	       "/Image%0*d Do Q\n",
+-	       info->width,
+-	       info->pclm_strip_height[i],
+-	       yAnchor,
+-	       num_digits(info->pclm_num_strips - 1),  // Number of padding digits
+-	       i);
+-            
+-       strcat(content, strip_cmd);
++      bytes = snprintf(strip_cmd, sizeof(strip_cmd),
++                       "/P <</MCID 0>> BDC q\n%u 0 0 %u 0 %u cm\n/Image%0*d Do Q\n",
++                       info->width,
++                       info->pclm_strip_height[i],
++                       yAnchor,
++                       id_width, i);
++      if (bytes < 0 || bytes >= (int)sizeof(strip_cmd) ||
++          !pdfioStreamWrite(info->page_stream, strip_cmd, (size_t)bytes))
++        goto draw_error;
+     }
+-
+   }
+ 
+-  pdfioStreamWrite(info->page_stream, (unsigned char *)content, strlen(content));
+   pdfioStreamClose(info->page_stream);
++  return 0;
+ 
+-  free(content);
+-  return 0; 
++draw_error:
++  if (doc->logfunc)
++    doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                 "cfFilterPWGToPDF: Failed to write page drawing commands.");
++  pdfioStreamClose(info->page_stream);
++  return 1;
+ }
+- 
++
++//
++// Perform modifications
+ //
+ // Perform modifications to PDF if color space conversions are needed
+ //
+@@ -1292,9 +1296,20 @@ prepare_pdf_page(struct pdf_info *info,
+       (height % info->pclm_strip_height_preferred ? 1 : 0);
+ 
+     info->pclm_strip_height = (unsigned *)realloc(info->pclm_strip_height,
+-		    			  info->pclm_num_strips * sizeof(unsigned));
++						  info->pclm_num_strips * sizeof(unsigned));
+     info->pclm_strip_data = (char **)realloc(info->pclm_strip_data,
+-		    			  info->pclm_num_strips * sizeof(char *));
++					     info->pclm_num_strips * sizeof(char *));
++    info->pclm_strip_data_size = (size_t *)realloc(info->pclm_strip_data_size,
++						   info->pclm_num_strips * sizeof(size_t));
++    if (!info->pclm_strip_height || !info->pclm_strip_data || !info->pclm_strip_data_size)
++    {
++      if (doc->logfunc)
++        doc->logfunc(doc->logdata, CF_LOGLEVEL_ERROR,
++                     "cfFilterPWGToPDF: Unable to allocate strip metadata");
++      return (1);
++    }
++    memset(info->pclm_strip_data, 0, info->pclm_num_strips * sizeof(char *));
++    memset(info->pclm_strip_data_size, 0, info->pclm_num_strips * sizeof(size_t));
+     for (size_t i = 0; i < info->pclm_num_strips; i ++)
+     {
+       info->pclm_strip_height[i] =
+@@ -1632,6 +1647,9 @@ cfFilterPWGToPDF(int inputfd,  // I - File descriptor input stream
+   FILE          	*outputfp;      // Output data stream
+   cf_filter_out_format_t outformat;     // Output format
+   int			Page, empty = 1;
++
++  // Initialize doc structure to prevent use of uninitialized memory
++  memset(&doc, 0, sizeof(doc));
+   cf_cm_calibration_t	cm_calibrate;   // Status of CUPS color management
+ 					// ("on" or "off")
+   struct pdf_info pdf;
+@@ -2018,4 +2036,3 @@ error:
+ 
+ 
+ 
+-
+diff --git a/cupsfilters/test-pclm-overflow.sh b/cupsfilters/test-pclm-overflow.sh
+new file mode 100755
+index 00000000..92695109
+--- /dev/null
++++ b/cupsfilters/test-pclm-overflow.sh
+@@ -0,0 +1,241 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++BUILD_ROOT="$(cd "${ROOT}/.." && pwd)"
++LIBTOOL="${BUILD_ROOT}/libtool"
++CC="${CC:-cc}"
++SAN_FLAGS="${SAN_FLAGS:--fsanitize=address -fno-omit-frame-pointer}"
++
++if [[ ! -x "${LIBTOOL}" ]]; then
++  echo "libtool helper not found at ${LIBTOOL}" >&2
++  exit 99
++fi
++
++TMP_PARENT="${TMPDIR:-/tmp}"
++WORKDIR="$(mktemp -d "${TMP_PARENT%/}/pclm-overflow.XXXXXX")"
++cleanup() {
++  rm -rf "${WORKDIR}"
++}
++trap cleanup EXIT
++
++TOOLS_DIR="${WORKDIR}/tools"
++mkdir -p "${TOOLS_DIR}"
++
++INPUT_PWG="${WORKDIR}/malicious.pwg"
++OUTPUT_PCLM="${WORKDIR}/out.pclm"
++HARNESS_SRC="${TOOLS_DIR}/trigger_overflow.c"
++HARNESS_OBJ="${TOOLS_DIR}/trigger_overflow.lo"
++HARNESS_BIN="${TOOLS_DIR}/trigger_overflow"
++PWG_SRC="${TOOLS_DIR}/make_pwg.c"
++PWG_BIN="${TOOLS_DIR}/make_pwg"
++RUN_LOG="${WORKDIR}/trigger.log"
++
++cat > "${PWG_SRC}" <<'EOF'
++#include <cups/raster.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++int main(int argc, char **argv) {
++  if (argc != 4) {
++    fprintf(stderr, "Usage: %s <width> <height> <output.pwg>\n", argv[0]);
++    return 1;
++  }
++
++  int width = atoi(argv[1]);
++  int height = atoi(argv[2]);
++  const char *outpath = argv[3];
++
++  if (width <= 0 || height <= 0) {
++    fprintf(stderr, "Width and height must be positive integers.\n");
++    return 1;
++  }
++
++  int fd = open(outpath, O_CREAT | O_TRUNC | O_WRONLY, 0644);
++  if (fd < 0) {
++    perror("open");
++    return 1;
++  }
++
++  cups_raster_t *ras = cupsRasterOpen(fd, CUPS_RASTER_WRITE);
++  if (!ras) {
++    fprintf(stderr, "Failed to open raster stream.\n");
++    close(fd);
++    return 1;
++  }
++
++  cups_page_header2_t header;
++  memset(&header, 0, sizeof(header));
++
++  header.HWResolution[0] = header.HWResolution[1] = 300;
++  header.PageSize[0] = 612;
++  header.PageSize[1] = 792;
++  header.cupsPageSize[0] = 612.0f;
++  header.cupsPageSize[1] = 792.0f;
++  header.cupsImagingBBox[0] = 0.0f;
++  header.cupsImagingBBox[1] = 0.0f;
++  header.cupsImagingBBox[2] = 612.0f;
++  header.cupsImagingBBox[3] = 792.0f;
++  header.cupsWidth = (unsigned)width;
++  header.cupsHeight = (unsigned)height;
++  header.cupsBitsPerColor = 8;
++  header.cupsBitsPerPixel = 8;
++  header.cupsNumColors = 1;
++  header.cupsBytesPerLine = (unsigned)width;
++  header.cupsColorOrder = CUPS_ORDER_CHUNKED;
++  header.cupsColorSpace = CUPS_CSPACE_K;
++  header.cupsCompression = 0; /* CUPS_COMPRESSION_NONE */
++
++  if (!cupsRasterWriteHeader2(ras, &header)) {
++    fprintf(stderr, "Failed to write PWG header.\n");
++    cupsRasterClose(ras);
++    close(fd);
++    return 1;
++  }
++
++  unsigned char *line = (unsigned char *)calloc((size_t)width, sizeof(unsigned char));
++  if (!line) {
++    fprintf(stderr, "Failed to allocate raster line.\n");
++    cupsRasterClose(ras);
++    close(fd);
++    return 1;
++  }
++
++  for (int y = 0; y < height; y++) {
++    if (cupsRasterWritePixels(ras, line, (unsigned)width) < (unsigned)width) {
++      fprintf(stderr, "Failed to write raster line %d.\n", y);
++      free(line);
++      cupsRasterClose(ras);
++      close(fd);
++      return 1;
++    }
++  }
++
++  free(line);
++  cupsRasterClose(ras);
++  close(fd);
++  return 0;
++}
++EOF
++
++"${CC}" -std=c11 -O0 ${SAN_FLAGS} -o "${PWG_BIN}" "${PWG_SRC}" -lcups
++"${PWG_BIN}" 1024 8000 "${INPUT_PWG}" >/dev/null
++
++cat > "${HARNESS_SRC}" <<'EOF'
++#define _GNU_SOURCE
++#include <cupsfilters/filter.h>
++#include <cups/ipp.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++static void usage(const char *prog) {
++  fprintf(stderr, "Usage: %s <input.pwg> <output.pclm>\n", prog);
++}
++
++int main(int argc, char **argv) {
++  if (argc != 3) {
++    usage(argv[0]);
++    return 1;
++  }
++
++  const char *input_path = argv[1];
++  const char *output_path = argv[2];
++
++  int in_fd = open(input_path, O_RDONLY);
++  if (in_fd < 0) {
++    perror("open input");
++    return 1;
++  }
++
++  int out_fd = open(output_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
++  if (out_fd < 0) {
++    perror("open output");
++    close(in_fd);
++    return 1;
++  }
++
++  ipp_t *attrs = ippNew();
++  if (!attrs) {
++    fprintf(stderr, "Failed to allocate IPP attributes.\n");
++    close(in_fd);
++    close(out_fd);
++    return 1;
++  }
++
++  ippAddInteger(attrs, IPP_TAG_PRINTER, IPP_TAG_INTEGER,
++                "pclm-strip-height-preferred", 1);
++
++  int strip_heights[2] = {1, 16};
++  ippAddIntegers(attrs, IPP_TAG_PRINTER, IPP_TAG_INTEGER,
++                 "pclm-strip-height-supported", 2, strip_heights);
++
++  ippAddString(attrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD,
++               "pclm-source-resolution-default", NULL, "300dpi");
++  ippAddString(attrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD,
++               "pclm-source-resolution-supported", NULL, "300dpi");
++  ippAddString(attrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD,
++               "pclm-compression-method-preferred", NULL, "flate");
++
++  cf_filter_data_t data;
++  memset(&data, 0, sizeof(data));
++  data.printer_attrs = attrs;
++  data.content_type = (char *)"image/pwg-raster";
++  data.final_content_type = (char *)"image/pclm";
++
++  cf_filter_out_format_t outformat = CF_FILTER_OUT_FORMAT_PCLM;
++
++  int ret = cfFilterPWGToPDF(in_fd, out_fd, 1, &data, &outformat);
++
++  ippDelete(attrs);
++  close(in_fd);
++  close(out_fd);
++
++  if (ret != 0) {
++    fprintf(stderr, "cfFilterPWGToPDF failed with code %d\n", ret);
++  }
++
++  return ret;
++}
++EOF
++
++"${LIBTOOL}" --mode=compile --tag=CC "${CC}" -std=c11 -O0 ${SAN_FLAGS} \
++  -I"${BUILD_ROOT}" -I"${BUILD_ROOT}/cupsfilters" \
++  -c "${HARNESS_SRC}" -o "${HARNESS_OBJ}" >/dev/null
++
++"${LIBTOOL}" --mode=link --tag=CC "${CC}" ${SAN_FLAGS} "${HARNESS_OBJ}" \
++  "${BUILD_ROOT}/libcupsfilters.la" -lcups -o "${HARNESS_BIN}" >/dev/null
++
++: > "${RUN_LOG}"
++ASAN_OPTS="${ASAN_OPTIONS:-detect_leaks=0,abort_on_error=0}"
++
++set +e
++"${LIBTOOL}" --mode=execute env ASAN_OPTIONS="${ASAN_OPTS}" \
++  "${HARNESS_BIN}" "${INPUT_PWG}" "${OUTPUT_PCLM}" \
++  >>"${RUN_LOG}" 2>&1
++STATUS=$?
++set -e
++
++if [[ ${STATUS} -ne 0 ]]; then
++  cat "${RUN_LOG}" >&2
++  echo "trigger_overflow exited with status ${STATUS}" >&2
++  exit 1
++fi
++
++if grep -q "AddressSanitizer" "${RUN_LOG}"; then
++  cat "${RUN_LOG}" >&2
++  echo "AddressSanitizer reported a memory error" >&2
++  exit 1
++fi
++
++if [[ ! -s "${OUTPUT_PCLM}" ]]; then
++  echo "No PCLm output generated" >&2
++  exit 1
++fi
++
++exit 0
+-- 
+2.53.0
+

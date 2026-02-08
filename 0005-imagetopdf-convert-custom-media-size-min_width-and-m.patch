@@ -1,0 +1,26 @@
+From be29729c44409c50f6e15beb0f7715eab95d214e Mon Sep 17 00:00:00 2001
+From: ValdikSS <iam@valdikss.org.ru>
+Date: Tue, 27 May 2025 18:54:50 +0300
+Subject: [PATCH 05/33] imagetopdf: convert custom media size min_width and
+ min_height to points. Fixes #87
+
+---
+ cupsfilters/imagetopdf.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/cupsfilters/imagetopdf.c b/cupsfilters/imagetopdf.c
+index f95c9859..a1e5ba6e 100644
+--- a/cupsfilters/imagetopdf.c
++++ b/cupsfilters/imagetopdf.c
+@@ -769,6 +769,8 @@ cfFilterImageToPDF(int inputfd,         // I - File descriptor input stream
+     customBottom = bottom * 72.0 / 2540.0;
+     customRight = right * 72.0 / 2540.0;
+     customTop = top * 72.0 / 2540.0;
++    min_width = min_width * 72 / 2540;
++    min_length = min_length * 72 / 2540;
+   }
+ 
+   //
+-- 
+2.53.0
+

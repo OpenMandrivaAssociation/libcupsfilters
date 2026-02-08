@@ -1,0 +1,63 @@
+From 53244ad7bff6da14794fc92fd77807adb153b579 Mon Sep 17 00:00:00 2001
+From: ThePhatak <111195860+uddhavphatak@users.noreply.github.com>
+Date: Tue, 7 Oct 2025 14:28:19 +0530
+Subject: [PATCH 19/33] Update build system and documentation to require PDFio
+ 1.6.0 (#101)
+
+---
+ .github/workflows/build.yaml | 8 ++++----
+ INSTALL.md                   | 2 +-
+ configure.ac                 | 2 +-
+ 3 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/.github/workflows/build.yaml b/.github/workflows/build.yaml
+index 4102531d..7488f2c8 100644
+--- a/.github/workflows/build.yaml
++++ b/.github/workflows/build.yaml
+@@ -25,13 +25,13 @@ jobs:
+        sudo apt install autotools-dev autopoint cmake libtool pkg-config libcups2-dev libexif-dev liblcms2-dev libfontconfig1-dev
+        sudo apt install libfreetype6-dev build-essential qtbase5-dev qtchooser libcairo2-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev libboost-test-dev libopenjp2-7-dev liblcms2-dev libjpeg-dev
+        sudo apt install -y libjxl-dev
+-    - name: Install pdfio >= 1.5.3
++    - name: Install pdfio >= 1.6.0
+       run: |
+         cd ..
+         mkdir pdfio
+-        wget https://github.com/michaelrsweet/pdfio/releases/download/v1.5.3/pdfio-1.5.3.tar.gz
+-        tar -xzf pdfio-1.5.3.tar.gz
+-        cd pdfio-1.5.3
++        wget https://github.com/michaelrsweet/pdfio/releases/download/v1.6.0/pdfio-1.6.0.tar.gz
++        tar -xzf pdfio-1.6.0.tar.gz
++        cd pdfio-1.6.0
+         ./configure --prefix=/usr --enable-shared
+         make all
+         make test
+diff --git a/INSTALL.md b/INSTALL.md
+index 718a1d05..57ddf852 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -19,7 +19,7 @@ For non-PDF printers (excluding Mac OS X users), you must install Ghostscript wi
+ - CUPS devel files (version 2.2.2 or higher)
+ - fontconfig devel files for texttopdf (disable using --without-fontconfig)
+ - liblcms (liblcms2 recommended) devel files for color management
+-- PDFio (1.5.3 or higher) devel files
++- PDFio (1.6.0 or higher) devel files
+ 
+ ### Additional Binaries for Non-PDF Printers
+ - Ghostscript 10.01.1 or higher (with specific output devices support)
+diff --git a/configure.ac b/configure.ac
+index d06bdc74..48c291fa 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -325,7 +325,7 @@ AS_IF([test x"$with_fontconfig" != "xno" && test "x$enable_texttopdf" != "xno"],
+ 	AC_DEFINE([HAVE_FONTCONFIG], [1], [Defines if we are using fontconfig.])
+   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig >= 2.0.0])
+ ])
+-PKG_CHECK_MODULES([LIBPDFIO], [pdfio >= 1.5.3])
++PKG_CHECK_MODULES([LIBPDFIO], [pdfio >= 1.6.0])
+ 
+ 
+ # =================
+-- 
+2.53.0
+

@@ -1,0 +1,621 @@
+From 26bf7c695bb7680fd5540003e8c902d2d98912f7 Mon Sep 17 00:00:00 2001
+From: Titiksha Bansal <129615682+TitikshaBansal@users.noreply.github.com>
+Date: Thu, 31 Jul 2025 23:02:28 +0530
+Subject: [PATCH 13/33] =?UTF-8?q?Add=20JPEG=E2=80=91XL=20Support=20to=20li?=
+ =?UTF-8?q?bcupsfilters=20(#82)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Winter of Code (WoC) 4.0 Contribution
+---
+ .github/workflows/build.yaml |   3 +-
+ INSTALL.md                   |  10 +-
+ Makefile.am                  |   6 +-
+ configure.ac                 |  21 +++
+ cupsfilters/image-jpeg-xl.c  | 344 +++++++++++++++++++++++++++++++++++
+ cupsfilters/image-jpeg-xl.h  |  27 +++
+ cupsfilters/image-private.h  |   3 +
+ cupsfilters/image.c          |  15 +-
+ cupsfilters/imagetopdf.c     |   1 -
+ cupsfilters/imagetoraster.c  |   2 +-
+ 10 files changed, 422 insertions(+), 10 deletions(-)
+ create mode 100644 cupsfilters/image-jpeg-xl.c
+ create mode 100644 cupsfilters/image-jpeg-xl.h
+
+diff --git a/.github/workflows/build.yaml b/.github/workflows/build.yaml
+index f0b947d1..da495b1a 100644
+--- a/.github/workflows/build.yaml
++++ b/.github/workflows/build.yaml
+@@ -24,6 +24,7 @@ jobs:
+        sudo apt-get install -y avahi-daemon libavahi-client-dev libssl-dev libpam-dev libusb-1.0-0-dev zlib1g-dev
+        sudo apt install autotools-dev autopoint cmake libtool pkg-config libcups2-dev libexif-dev liblcms2-dev libfontconfig1-dev
+        sudo apt install libfreetype6-dev build-essential qtbase5-dev qtchooser libcairo2-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev libboost-test-dev libopenjp2-7-dev liblcms2-dev libjpeg-dev
++       sudo apt install -y libjxl-dev
+     - name: Install libqpdf > 11.0.0
+       run: |
+         cd ..
+@@ -57,4 +58,4 @@ jobs:
+     - name: make
+       run: make
+     - name: Run Tests
+-      run: make check || cat test/error_log*
+\ No newline at end of file
++      run: make check || cat test/error_log*
+diff --git a/INSTALL.md b/INSTALL.md
+index e5f7193d..e0e0c312 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -28,7 +28,7 @@ or
+ - MuPDF (version 1.15 or higher)
+ 
+ ### Optional Features
+-- libdbus, libjpeg, libpng, libtiff, libexif devel files for various format supports
++- libdbus, libjpeg, libpng, libtiff, libexif, libjxl devel files for various format supports
+ - Dejavu Sans fonts for internal test suite
+ 
+ ### Compiler and Make Tools
+@@ -98,9 +98,9 @@ make check
+   ```
+   sudo apt-get install ghostscript
+   ```
+-- Install optional libraries (libdbus, libjpeg, libpng, libtiff, libexif):
++- Install optional libraries (libdbus, libjpeg, libpng, libtiff, libexif, libjxl):
+   ```
+-  sudo apt-get install libdbus-1-dev libjpeg-dev libpng-dev libtiff-dev libexif-dev
++  sudo apt-get install libdbus-1-dev libjpeg-dev libpng-dev libtiff-dev libexif-dev libjxl-dev
+   ```
+ - Install Dejavu Sans fonts (for internal test suite):
+   ```
+@@ -120,9 +120,9 @@ make check
+   ```
+   sudo dnf install ghostscript
+   ```
+-- Install optional libraries (libdbus, libjpeg, libpng, libtiff, libexif):
++- Install optional libraries (libdbus, libjpeg, libpng, libtiff, libexif, libjxl):
+   ```
+-  sudo dnf install dbus-devel libjpeg-turbo-devel libpng-devel libtiff-devel libexif-devel
++  sudo dnf install dbus-devel libjpeg-turbo-devel libpng-devel libtiff-devel libexif-devel libjxl-devel
+   ```
+ - Install Dejavu Sans fonts (for internal test suite):
+   ```
+diff --git a/Makefile.am b/Makefile.am
+index ddebb5be..82132a24 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -169,6 +169,7 @@ libcupsfilters_la_SOURCES = \
+ 	cupsfilters/image-png.c \
+ 	cupsfilters/image-private.h \
+ 	cupsfilters/image-tiff.c \
++	cupsfilters/image-jpeg-xl.c \
+ 	cupsfilters/image-zoom.c \
+ 	cupsfilters/imagetopdf.c \
+ 	cupsfilters/imagetoraster.c \
+@@ -219,6 +220,7 @@ libcupsfilters_la_LIBADD = \
+ 	$(LCMS_LIBS) \
+ 	$(LIBQPDF_LIBS) \
+ 	$(LIBJPEG_LIBS) \
++	$(LIBJXL_LIBS) \
+ 	$(EXIF_LIBS) \
+ 	$(LIBPNG_LIBS) \
+ 	$(TIFF_LIBS) \
+@@ -234,12 +236,14 @@ libcupsfilters_la_CFLAGS = \
+ 	$(LCMS_CFLAGS) \
+ 	$(LIBQPDF_CFLAGS) \
+ 	$(LIBJPEG_CFLAGS) \
++	$(LIBJXL_CFLAGS) \
+ 	$(EXIF_CFLAGS) \
+ 	$(LIBPNG_CFLAGS) \
+ 	$(TIFF_CFLAGS)
+ libcupsfilters_la_LDFLAGS = \
+ 	-no-undefined \
+-	-version-info 2
++	-version-info 2 \
++	$(LIBJXL_LIBS)
+ if BUILD_DBUS
+ libcupsfilters_la_CFLAGS += $(DBUS_CFLAGS) -DHAVE_DBUS
+ libcupsfilters_la_CXXFLAGS = -std=c++11 $(libcupsfilters_la_CFLAGS)   # -std=c++11
+diff --git a/configure.ac b/configure.ac
+index 4139012a..9adb4e65 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -256,6 +256,26 @@ AS_IF([test x"$with_tiff" != "xno"], [
+ 	AC_SUBST(LIBTIFF_LIBS)
+ ])
+ 
++AC_ARG_WITH([jpegxl],
++    [AS_HELP_STRING([--without-jpegxl], [Disable JPEG‑XL support.])],
++    [with_jpegxl="$withval"],
++    [with_jpegxl=yes]
++)
++AS_IF([test x"$with_jpegxl" != "xno"], [
++    PKG_CHECK_MODULES([LIBJXL], [libjxl >= 0.7.0],
++        [
++            AC_DEFINE([HAVE_LIBJXL], [1], [Define if libjxl is available for JPEG‑XL support])
++            AC_SUBST(LIBJXL_CFLAGS)
++            AC_SUBST(LIBJXL_LIBS)
++        ],
++        [
++            AC_MSG_ERROR([libjxl is required for JPEG‑XL support, but it was not found.])
++        ]
++    )
++], [
++    AC_MSG_NOTICE([JPEG‑XL support disabled.])
++])
++
+ dnl including EXIF library
+ EXIF_LIBS=""
+ EXIF_CFLAGS=""
+@@ -507,6 +527,7 @@ Build configuration:
+ 	ippfind-path:    ${with_ippfind_path}
+ 	imagefilters:    ${enable_imagefilters}
+ 	jpeg:            ${with_jpeg}
++	jpegxl:          ${with_jpegxl}
+ 	exif:            ${enable_exif}
+ 	png:             ${with_png}
+ 	tiff:            ${with_tiff}
+diff --git a/cupsfilters/image-jpeg-xl.c b/cupsfilters/image-jpeg-xl.c
+new file mode 100644
+index 00000000..2cc4e889
+--- /dev/null
++++ b/cupsfilters/image-jpeg-xl.c
+@@ -0,0 +1,344 @@
++//
++// JPEG‑XL image routines for libcupsfilters.
++//
++// Copyright 2025 by Titiksha Bansal.
++//
++// Licensed under Apache License v2.0.  See the file "LICENSE" for more
++// information.
++//
++// Contents:
++//
++//   _cfIsJPEGXL()                          - Check if the file header indicates JPEG‑XL format.
++//   _cfImageReadJPEGXL()                   - Read a JPEG‑XL image file using libjxl and fill a 
++//                                            cf_image_t structure.
++//
++
++
++//
++// Include necessary headers
++//
++
++
++#include "config.h"
++
++#ifdef HAVE_LIBJXL
++#include "image-jpeg-xl.h"
++#include <jxl/decode.h>
++#include <jxl/types.h>
++#include <stdlib.h>
++#include <string.h>
++#include <inttypes.h>  // For PRIu64 
++
++
++//
++// _cfIsJPEGXL() - Check if the header bytes indicate a JPEG‑XL file.
++// Checks both the container signature ("0000000C4A584C20") and the stream signature ("FF0A").
++//
++
++int
++_cfIsJPEGXL(const unsigned char *header, 
++            size_t len)
++{
++  if (len < 12)
++    return 0;
++  
++  JxlSignature sig = JxlSignatureCheck((const uint8_t *)header, len);
++  
++  return (sig == JXL_SIG_CODESTREAM || sig == JXL_SIG_CONTAINER);
++  return 0;
++}
++
++
++//
++// _cfImageReadJPEGXL() - Read a JPEG‑XL image using libjxl.
++// Reads the entire file from the given FILE pointer, decodes it using libjxl,
++// and fills the provided cf_image_t structure. Returns 0 on success, nonzero on failure.
++//
++
++int
++_cfImageReadJPEGXL( cf_image_t      *img,
++                FILE            *fp,
++                cf_icspace_t    primary,
++                cf_icspace_t    secondary,
++                int             saturation,
++                int             hue,
++                const cf_ib_t   *lut)
++{
++  JxlDecoder *dec = NULL;
++  JxlBasicInfo info;
++  JxlDecoderStatus status;
++  uint8_t *jxl_data = NULL;
++  long jxl_size;
++  int ok = 0;
++  size_t bytes_read;
++
++  //
++  // Read entire file into memory
++  //
++
++  fseek(fp, 0, SEEK_END);
++  jxl_size = ftell(fp);
++  fseek(fp, 0, SEEK_SET);
++  jxl_data = (uint8_t*)malloc(jxl_size);
++  if (!jxl_data)
++  {
++    fclose(fp);
++    return 1;
++  }
++  bytes_read = fread(jxl_data, 1, jxl_size, fp);
++  if (bytes_read != (size_t)jxl_size)
++  {
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  dec = JxlDecoderCreate(NULL);
++  if (!dec)
++  {
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  status = JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE);
++  if (status != JXL_DEC_SUCCESS)
++  {
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  JxlDecoderSetInput(dec, jxl_data, jxl_size);
++
++  //
++  // Process to get basic info
++  //
++  
++  status = JxlDecoderProcessInput(dec);
++  if (status != JXL_DEC_BASIC_INFO)
++  {
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  if (JxlDecoderGetBasicInfo(dec, &info) != JXL_DEC_SUCCESS)
++  {
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  img->xsize = info.xsize;
++  img->ysize = info.ysize;
++
++  //
++  // Validate dimensions
++  //
++  
++  if (img->xsize == 0 || img->xsize > CF_IMAGE_MAX_WIDTH ||
++      img->ysize == 0 || img->ysize > CF_IMAGE_MAX_HEIGHT)
++  {
++    DEBUG_printf(("DEBUG: JXL image has invalid dimensions %ux%u!\n",
++                  (unsigned)img->xsize, (unsigned)img->ysize));
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  //
++  // Read EXIF data (if available)
++  //
++  
++#ifdef HAVE_EXIF
++  fseek(fp, 0, SEEK_SET);
++  int temp = _cfImageReadEXIF(img, fp);    // Handle resolution from EXIF if needed
++#endif
++
++  //
++  // Determine colorspace based on number of color channels
++  //
++  
++  if (info.num_color_channels == 3)
++  {
++    img->colorspace = (primary == CF_IMAGE_RGB_CMYK) ? CF_IMAGE_RGB : primary;
++  } 
++  else
++  {
++    img->colorspace = secondary;
++  }
++
++  //
++  // Set up pixel format for decoding
++  //
++  
++  JxlPixelFormat format;
++  format.num_channels = (info.num_color_channels == 1) ? 1 : 3;
++  if (info.alpha_bits > 0)
++  {
++    format.num_channels++;
++  }
++  format.data_type = JXL_TYPE_UINT8;
++  format.endianness = JXL_NATIVE_ENDIAN;
++  format.align = 0;
++
++  size_t buffer_size;
++  if (JxlDecoderImageOutBufferSize(dec, &format, &buffer_size) != JXL_DEC_SUCCESS)
++  {
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  uint8_t *pixels = (uint8_t*)malloc(buffer_size);
++  if (!pixels)
++  {
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  if (JxlDecoderSetImageOutBuffer(dec, &format, pixels, buffer_size) != JXL_DEC_SUCCESS)
++  {
++    free(pixels);
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  //
++  // Process to get the full image
++  //
++  
++  status = JxlDecoderProcessInput(dec);
++  if (status != JXL_DEC_FULL_IMAGE)
++  {
++    free(pixels);
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  //
++  // Handle alpha blending with white background
++  //
++  
++  if (info.alpha_bits > 0)
++  {
++    int channels = format.num_channels;
++    size_t pixel_count = img->xsize * img->ysize;
++    for (size_t i = 0; i < pixel_count; i++)
++    {
++      uint8_t *pixel = pixels + i * channels;
++      uint8_t alpha = pixel[channels - 1];
++      if (alpha != 255)
++      {
++        float ratio = alpha / 255.0f;
++        for (int c = 0; c < channels - 1; c++)
++        {
++          pixel[c] = (uint8_t)(pixel[c] * ratio + 255 * (1.0f - ratio) + 0.5f);
++        }
++        pixel[channels - 1] = 255;
++      }
++    }
++  }
++
++  //
++  // Process each row for colorspace conversion and LUT
++  //
++  
++  int bpp = cfImageGetDepth(img);
++  cf_ib_t *out = (cf_ib_t*)calloc(img->xsize * bpp, sizeof(cf_ib_t));
++  if (!out)
++  {
++    free(pixels);
++    JxlDecoderDestroy(dec);
++    free(jxl_data);
++    fclose(fp);
++    return 1;
++  }
++
++  for (int y = 0; y < img->ysize; y++)
++  {
++    uint8_t *row = pixels + y * img->xsize * format.num_channels;
++
++    if (info.num_color_channels == 3)
++    {                  // RGB(A) Image
++      if (saturation != 100 || hue != 0)
++      {
++        cfImageRGBAdjust(row, img->xsize, saturation, hue);
++      }
++
++      switch (img->colorspace)
++      {
++        case CF_IMAGE_WHITE:
++          cfImageRGBToWhite(row, out, img->xsize);
++          break;
++        case CF_IMAGE_RGB:
++        case CF_IMAGE_RGB_CMYK:
++          cfImageRGBToRGB(row, out, img->xsize);
++          break;
++        case CF_IMAGE_BLACK:
++          cfImageRGBToBlack(row, out, img->xsize);
++          break;
++        case CF_IMAGE_CMY:
++          cfImageRGBToCMY(row, out, img->xsize);
++          break;
++        case CF_IMAGE_CMYK:
++          cfImageRGBToCMYK(row, out, img->xsize);
++          break;
++      }
++    } 
++    else
++    {                                              // Grayscale Image
++      switch (img->colorspace)
++      {
++        case CF_IMAGE_WHITE:
++          memcpy(out, row, img->xsize);
++          break;
++        case CF_IMAGE_RGB:
++        case CF_IMAGE_RGB_CMYK:
++          cfImageWhiteToRGB(row, out, img->xsize);
++          break;
++        case CF_IMAGE_BLACK:
++          cfImageWhiteToBlack(row, out, img->xsize);
++          break;
++        case CF_IMAGE_CMY:
++          cfImageWhiteToCMY(row, out, img->xsize);
++          break;
++        case CF_IMAGE_CMYK:
++          cfImageWhiteToCMYK(row, out, img->xsize);
++          break;
++      }
++    }
++
++    if (lut)
++    {
++      cfImageLut(out, img->xsize * bpp, lut);
++    }
++
++    _cfImagePutRow(img, 0, y, img->xsize, out);
++  }
++
++  //
++  // Cleanup
++  //
++  
++  free(out);
++  free(pixels);
++  JxlDecoderDestroy(dec);
++  free(jxl_data);
++  fclose(fp);
++
++  return 0;
++}
++#endif // HAVE_LIBJXL
+diff --git a/cupsfilters/image-jpeg-xl.h b/cupsfilters/image-jpeg-xl.h
+new file mode 100644
+index 00000000..7566e47c
+--- /dev/null
++++ b/cupsfilters/image-jpeg-xl.h
+@@ -0,0 +1,27 @@
++//
++// JPEG‑XL image routines for libcupsfilters.
++//
++// Copyright 2025 by Titiksha Bansal.
++//
++// Licensed under Apache License v2.0.  See the file "LICENSE" for more
++// information.
++//
++// Contents:
++//
++//   _cfIsJPEGXL()            - Check if the file header indicates JPEG‑XL format.
++//   _cfImageReadJPEGXL()     - Read a JPEG‑XL image file using libjxl and fill a cf_image_t structure.
++//
++
++
++#ifdef HAVE_LIBJXL
++#include <stdio.h>
++#include "image-private.h"
++#include <jxl/decode.h>
++
++int _cfIsJPEGXL(const unsigned char *header, size_t len);
++
++int _cfImageReadJPEGXL(cf_image_t *img, FILE *fp,
++                       cf_icspace_t primary, cf_icspace_t secondary,
++                       int saturation, int hue, const cf_ib_t *lut);
++
++#endif // HAVE_LIBJXL
+diff --git a/cupsfilters/image-private.h b/cupsfilters/image-private.h
+index 6a2e798b..2c01e0dc 100644
+--- a/cupsfilters/image-private.h
++++ b/cupsfilters/image-private.h
+@@ -39,6 +39,9 @@
+ #	include <libexif/exif-data.h>
+ #endif
+ 
++#ifdef HAVE_LIBJXL
++#include "image-jpeg-xl.h"
++#endif
+ 
+ //
+ // Constants...
+diff --git a/cupsfilters/image.c b/cupsfilters/image.c
+index 75c7e029..f53af1e9 100644
+--- a/cupsfilters/image.c
++++ b/cupsfilters/image.c
+@@ -38,6 +38,12 @@
+ 
+ 
+ #include "image-private.h"
++#include "config.h"
++
++#ifdef HAVE_LIBJXL
++#include <jxl/decode.h>
++#include "image-jpeg-xl.h"
++#endif
+ 
+ 
+ //
+@@ -314,7 +320,7 @@ cfImageOpen(
+ 		filename ? filename : "(null)", primary, secondary,
+ 		saturation, hue, lut));
+ 
+-  if ((fp = fopen(filename, "r")) == NULL)
++  if ((fp = fopen(filename, "rb")) == NULL)
+     return (NULL);
+ 
+   return (cfImageOpenFP(fp, primary, secondary, saturation, hue, lut));
+@@ -404,6 +410,13 @@ cfImageOpenFP(
+ 			      lut);
+   else
+ #endif // HAVE_LIBTIFF
++#ifdef HAVE_LIBJXL
++  if (_cfIsJPEGXL(header, sizeof(header)))
++    status = _cfImageReadJPEGXL(img, fp, primary, secondary, saturation, hue, 
++	    			lut);
++  else
++#endif // HAVE_LIBJXL
++	  
+   {
+     fclose(fp);
+     status = -1;
+diff --git a/cupsfilters/imagetopdf.c b/cupsfilters/imagetopdf.c
+index a1e5ba6e..20307463 100644
+--- a/cupsfilters/imagetopdf.c
++++ b/cupsfilters/imagetopdf.c
+@@ -21,7 +21,6 @@
+ #include <cupsfilters/image.h>
+ #include <cupsfilters/ipp.h>
+ #include <cupsfilters/raster.h>
+-#include <cupsfilters/ipp.h>
+ #include <cupsfilters/image-private.h>
+ #include <cupsfilters/libcups2-private.h>
+ #include <math.h>
+diff --git a/cupsfilters/imagetoraster.c b/cupsfilters/imagetoraster.c
+index feb2e790..eea5602d 100644
+--- a/cupsfilters/imagetoraster.c
++++ b/cupsfilters/imagetoraster.c
+@@ -416,7 +416,7 @@ cfFilterImageToRaster(int inputfd,         // I - File descriptor input stream
+   //
+ 
+   cfRasterPrepareHeader(&header, data, outformat,
+-			CF_FILTER_OUT_FORMAT_CUPS_RASTER, 1, &cspace);
++			CF_FILTER_OUT_FORMAT_CUPS_RASTER, 0, &cspace);
+   doc.Orientation = header.Orientation;
+   doc.Duplex = header.Duplex;
+   doc.Color = header.cupsNumColors>1?1:0;
+-- 
+2.53.0
+

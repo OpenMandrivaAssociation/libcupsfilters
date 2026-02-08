@@ -1,0 +1,44 @@
+From badb59efbbfab2e64140422e3ba9fec5faee5281 Mon Sep 17 00:00:00 2001
+From: IliaKash1 <135283719+IliaKash1@users.noreply.github.com>
+Date: Mon, 8 Dec 2025 22:32:43 +0300
+Subject: [PATCH 26/33] Potential heap-buffer-overflow fix (#108)
+
+TIFF files in PHOTOMETRIC_MINISWHITE or PHOTOMETRIC_MINISBLACK
+modes (monochrome) with more than one sample per pixel caused a crash.
+
+Fixes issue #107
+---
+ cupsfilters/image-tiff.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/cupsfilters/image-tiff.c b/cupsfilters/image-tiff.c
+index df8b6e85..02aa4b76 100644
+--- a/cupsfilters/image-tiff.c
++++ b/cupsfilters/image-tiff.c
+@@ -353,9 +353,13 @@ _cfImageReadTIFF(
+   // Allocate input and output buffers...
+   //
+ 
++  int multi_pixel = (photometric != PHOTOMETRIC_MINISWHITE &&
++                    photometric != PHOTOMETRIC_MINISBLACK &&
++                    (samples > 1 || photometric == PHOTOMETRIC_PALETTE));
++
+   if (orientation < ORIENTATION_LEFTTOP)
+   {
+-    if (samples > 1 || photometric == PHOTOMETRIC_PALETTE)
++    if (multi_pixel)
+       pstep = xdir * 3;
+     else
+       pstep = xdir;
+@@ -378,7 +382,7 @@ _cfImageReadTIFF(
+   }
+   else
+   {
+-    if (samples > 1 || photometric == PHOTOMETRIC_PALETTE)
++    if (multi_pixel)
+       pstep = ydir * 3;
+     else
+       pstep = ydir;
+-- 
+2.53.0
+

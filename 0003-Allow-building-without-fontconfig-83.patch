@@ -1,0 +1,195 @@
+From 3fb2ec5cf12089fcb47442a89f2baea3804fc066 Mon Sep 17 00:00:00 2001
+From: Nathan Muggli <muggli.nathan@gmail.com>
+Date: Wed, 19 Mar 2025 02:36:27 -0600
+Subject: [PATCH 03/33] Allow building without fontconfig (#83)
+
+The texttopdf filter (cfFilterTextToPDF() filter function is the only thing
+using fontconfig.
+
+Added a configure option to build without fontconfig and don't
+build this filter if that is specified.
+
+The default configuration is to use fontconfig, so there should be no
+changes to existing functionality.
+
+Instead of only defining the cfFilterTextToPDF() filter function if
+HAVE_FONTCONFIG is defined, always define this function and just exit
+early if there is no fontconfig.
+
+Also, fixed a minor compiler warning when building without exif.
+---
+ INSTALL.md              |  2 +-
+ configure.ac            | 18 +++++++++++++++++-
+ cupsfilters/image.c     |  2 ++
+ cupsfilters/texttopdf.c | 18 ++++++++++++++++--
+ cupsfilters/universal.c |  5 ++++-
+ 5 files changed, 40 insertions(+), 5 deletions(-)
+
+diff --git a/INSTALL.md b/INSTALL.md
+index aa97ced1..e5f7193d 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -18,7 +18,7 @@ For non-PDF printers (excluding Mac OS X users), you must install Ghostscript wi
+ - autoconf, autopoint, automake, libtool for ./autogen.sh
+ - CUPS devel files (version 2.2.2 or higher)
+ - Poppler (with --enable-poppler-cpp) devel files for pdftoraster
+-- fontconfig devel files for texttopdf
++- fontconfig devel files for texttopdf (disable using --without-fontconfig)
+ - liblcms (liblcms2 recommended) devel files for color management
+ - QPDF (11.0 or higher, 11.4.0 recommended) devel files
+ 
+diff --git a/configure.ac b/configure.ac
+index f652f045..4139012a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -290,7 +290,21 @@ AS_IF([test x"$lcms2" = "xno"], [
+ 	PKG_CHECK_MODULES([LCMS], [lcms])
+ 	AC_DEFINE([USE_LCMS1], [1], [Defines if use lcms1])
+ ])
+-PKG_CHECK_MODULES([FONTCONFIG], [fontconfig >= 2.0.0])
++AC_ARG_WITH([fontconfig],
++	[AS_HELP_STRING([--without-fontconfig], [Disable fontconfig support.])],
++	[with_fontconfig="$withval"],
++	[with_fontconfig=yes]
++)
++# --disable-texttopdf will do the same thing as --without-fontconfig.
++AC_ARG_ENABLE([texttopdf],
++	[AS_HELP_STRING([--disable-texttopdf], [Disable the texttopdf filter.])],
++	[enable_texttopdf="$enableval"],
++	[enable_texttopdf=yes]
++)
++AS_IF([test x"$with_fontconfig" != "xno" && test "x$enable_texttopdf" != "xno"], [
++	AC_DEFINE([HAVE_FONTCONFIG], [1], [Defines if we are using fontconfig.])
++  PKG_CHECK_MODULES([FONTCONFIG], [fontconfig >= 2.0.0])
++])
+ PKG_CHECK_MODULES([LIBQPDF], [libqpdf >= 11.0.0])
+ 
+ # =================
+@@ -496,6 +510,8 @@ Build configuration:
+ 	exif:            ${enable_exif}
+ 	png:             ${with_png}
+ 	tiff:            ${with_tiff}
++	fontconfig:      ${with_fontconfig}
++	texttopdf:       ${enable_texttopdf}
+ 	dbus:            ${enable_dbus}
+ 	werror:          ${enable_werror}
+ 	test-font:       ${with_test_font_path}
+diff --git a/cupsfilters/image.c b/cupsfilters/image.c
+index 1ba0d5e6..75c7e029 100644
+--- a/cupsfilters/image.c
++++ b/cupsfilters/image.c
+@@ -46,8 +46,10 @@
+ 
+ static int	flush_tile(cf_image_t *img);
+ static cf_ib_t	*get_tile(cf_image_t *img, int x, int y);
++#ifdef HAVE_EXIF
+ static void trim_spaces(char *buf);
+ static unsigned char *find_bytes(FILE *fp, long int *size);
++#endif // HAVE_EXIF
+ 
+ //
+ // 'cfImageClose()' - Close an image file.
+diff --git a/cupsfilters/texttopdf.c b/cupsfilters/texttopdf.c
+index eba323d6..8e6f528c 100644
+--- a/cupsfilters/texttopdf.c
++++ b/cupsfilters/texttopdf.c
+@@ -23,7 +23,9 @@
+ #include <cupsfilters/libcups2-private.h>
+ #include <ctype.h>
+ #include <errno.h>
++#ifdef HAVE_FONTCONFIG
+ #include "fontconfig/fontconfig.h"
++#endif // HAVE_FONTCONFIG
+ 
+ 
+ //
+@@ -55,6 +57,7 @@
+ // Globals...
+ //
+ 
++#ifdef HAVE_FONTCONFIG
+ static char *code_keywords[] =	// List of known C/C++ keywords...
+ 	{
+ 	  "and",
+@@ -546,6 +549,7 @@ static int      write_prolog(const char *title, const char *user,
+ 			    cf_logfunc_t log, void *ld);
+ static void     write_page(texttopdf_doc_t *doc);
+ static void     write_epilogue(texttopdf_doc_t *doc);
++#endif // HAVE_FONTCONFIG
+ 
+ 
+ //
+@@ -562,6 +566,13 @@ cfFilterTextToPDF(int inputfd,  	// I - File descriptor input stream
+ 		  void *parameters)	// I - Filter-specific parameters
+ 					//     (unused)
+ {
++#ifndef HAVE_FONTCONFIG
++  cf_logfunc_t  log = data->logfunc;
++  void		*ld = data->logdata;
++  if (log) log(ld, CF_LOGLEVEL_ERROR,
++	       "cfFilterTextToPDF: Text-to-PDF conversion not supported (no fontconfig).");
++  return (1);
++#else
+   texttopdf_doc_t doc;
+   int		i,		// Looping var
+ 		temp,
+@@ -650,7 +661,7 @@ cfFilterTextToPDF(int inputfd,  	// I - File descriptor input stream
+     if (!iscanceled || !iscanceled(icd))
+     {
+       if (log) log(ld, CF_LOGLEVEL_DEBUG,
+-		   "textopdf: Unable to open input data stream.");
++		   "cfFilterTextToPDF: Unable to open input data stream.");
+     }
+     return (1);
+   }
+@@ -1460,7 +1471,7 @@ cfFilterTextToPDF(int inputfd,  	// I - File descriptor input stream
+   if (empty)
+   {
+     if(log) log(ld, CF_LOGLEVEL_DEBUG,
+-		"Input is empty, outputting empty file");
++		"cfFilterTextToPDF: Input is empty, outputting empty file");
+     goto out;
+   }
+ 
+@@ -1524,8 +1535,10 @@ cfFilterTextToPDF(int inputfd,  	// I - File descriptor input stream
+     free(doc.pdf);
+ 
+   return (ret);
++#endif // HAVE_FONTCONFIG
+ }
+ 
++#ifdef HAVE_FONTCONFIG
+ 
+ static _cf_fontembed_emb_params_t *
+ font_load(const char *font,
+@@ -2651,3 +2664,4 @@ write_pretty_header(texttopdf_doc_t *doc) // {{{
+   _cfPDFOutPrintF(doc->pdf, "Q\n");
+ }
+ // }}}
++#endif // HAVE_FONTCONFIG
+diff --git a/cupsfilters/universal.c b/cupsfilters/universal.c
+index dd4c0b79..0e7251f7 100644
+--- a/cupsfilters/universal.c
++++ b/cupsfilters/universal.c
+@@ -168,6 +168,7 @@ cfFilterUniversal(int inputfd,		// I - File descriptor input stream
+     }
+     else
+ #endif // HAVE_GHOSTSCRIPT
++#ifdef HAVE_FONTCONFIG
+     if (!strcasecmp(input_super, "text") ||
+ 	(!strcasecmp(input_super, "application") && input_type[0] == 'x'))
+     {
+@@ -187,7 +188,9 @@ cfFilterUniversal(int inputfd,		// I - File descriptor input stream
+ 		   "cfFilterUniversal: Adding %s to chain",
+ 		   filter->name);
+     }
+-    else if (!strcasecmp(input, "image/urf") ||
++    else
++#endif // HAVE_FONTCONFIG
++    if (!strcasecmp(input, "image/urf") ||
+ 	     !strcasecmp(input, "image/pwg-raster"))
+     {
+       outformat = malloc(sizeof(cf_filter_out_format_t));
+-- 
+2.53.0
+

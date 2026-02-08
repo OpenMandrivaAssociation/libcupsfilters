@@ -1,0 +1,26 @@
+From d2bd9b005f27e1a68f6164f6a436fcac7e3ce0da Mon Sep 17 00:00:00 2001
+From: uddhav Phatak <uddhavabhijeet@gmail.com>
+Date: Sun, 25 Jan 2026 00:01:53 +0530
+Subject: [PATCH 31/33] change the log line to show [x1, y1, x2, y2] from [x1,
+ x2, y1, y2]
+
+---
+ cupsfilters/pdftoraster.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+index bddddf8f..d01b6214 100644
+--- a/cupsfilters/pdftoraster.c
++++ b/cupsfilters/pdftoraster.c
+@@ -2075,7 +2075,7 @@ out_page(pdftoraster_doc_t *doc,		// I - conversion attributes
+ 
+   if (log) log(ld, CF_LOGLEVEL_DEBUG,
+                "cfFilterPDFToRaster: cropbox = [ %f %f %f %f ]; rotate = %f",
+-               cropBox.x1, cropBox.x2, cropBox.y1, cropBox.y2,
++               cropBox.x1, cropBox.y1, cropBox.x2, cropBox.y2,
+                rotate);
+   
+   // Enter input page dimensions in header, so that if no page size got
+-- 
+2.53.0
+

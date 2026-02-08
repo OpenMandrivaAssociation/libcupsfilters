@@ -1,3 +1,5 @@
+%global __scm git
+
 %define major 2
 %define libname %mklibname cupsfilters
 %define devname %mklibname cupsfilters -d
@@ -14,17 +16,16 @@ BuildRequires: pkgconfig(libpng)
 BuildRequires: pkgconfig(dbus-1)
 BuildRequires: pkgconfig(harfbuzz)
 BuildRequires: pkgconfig(freetype2)
-BuildRequires: pkgconfig(poppler-cpp)
 BuildRequires: pkgconfig(libtiff-4)
-BuildRequires: pkgconfig(libqpdf)
 BuildRequires: pkgconfig(lcms2)
 BuildRequires: pkgconfig(libjpeg)
 BuildRequires: pkgconfig(fontconfig)
 BuildRequires: pkgconfig(cups)
 BuildRequires: pkgconfig(libexif)
+BuildRequires: pkgconfig(pdfio)
 BuildRequires: autoconf
 BuildRequires: automake
-BuildRequires: libtool
+BuildRequires: slibtool
 BuildRequires: make
 BuildRequires: gettext-devel
 BuildRequires: mupdf
@@ -33,7 +34,39 @@ Requires: (ghostscript or ghostpdl)
 Requires: mupdf
 
 %patchlist
-https://github.com/OpenPrinting/libcupsfilters/commit/b69dfacec7f17628178.patch
+0001-cfFilterTextToPDF-Let-all-Arabic-characters-be-rende.patch
+0002-Fixed-Deadlock-in-Filter-Chain-When-One-Filter-Fails.patch
+0003-Allow-building-without-fontconfig-83.patch
+0004-cfFilterChain-Initialize-return-value-to-0.patch
+0005-imagetopdf-convert-custom-media-size-min_width-and-m.patch
+0006-Poppler-imagetoraster-fix-mono-dithering-of-100-blac.patch
+0007-Poppler-pdftoraster-disable-font-anti-aliasing-for-1.patch
+0008-Poppler-pdftoraster-enable-font-hinting-for-better-f.patch
+0009-pdftoraster-ghostscript-mupdftopwg-Check-strchr-resu.patch
+0010-PDFTOPDFCollate-comment-parsing-Increment-p-where-ne.patch
+0011-pdftoraster-Check-result-of-render_page-95.patch
+0012-image-zoom.c-add-the-xsize-and-ysize-check-for-zero-.patch
+0013-Add-JPEG-XL-Support-to-libcupsfilters-82.patch
+0014-configure.ac-Make-CJK-fonts-name-configurable.patch
+0015-cfFilterGhostscript-Introduce-cupsHalftoneType-dithe.patch
+0016-Replace-QPDF-by-PDFio-as-PDF-manipulation-library-in.patch
+0017-image-jpeg-xl.c-Silenced-warnings-about-unused-varia.patch
+0018-Use-bin-sh-for-testfilters.sh-to-avoid-dependency-on.patch
+0019-Update-build-system-and-documentation-to-require-PDF.patch
+0020-cfFilterImageToPDF-Added-extra-debug-log-messages-co.patch
+0021-Fix-for-security-vulnerablity-due-to-use-of-system-f.patch
+0022-Fix-PCLm-strip-overflow-and-add-regression-test-105.patch
+0023-Merge-commit-from-fork.patch
+0024-Fix-out-of-bounds-write-in-cfFilterPDFToRaster.patch
+0025-image-tiff.c-Unify-return-values.patch
+0026-Potential-heap-buffer-overflow-fix-108.patch
+0027-Fix-cache-thrashing-for-large-images-106.patch
+0028-add-documentation-comments.patch
+0029-Fix-error-in-PDFtoRaster-due-to-execv.patch
+0030-fix-padding-issue-when-input-image-is-smaller-than-o.patch
+0031-change-the-log-line-to-show-x1-y1-x2-y2-from-x1-x2-y.patch
+0032-texttopdf-default-to-UTF-8-when-charset-metadata-is-.patch
+0033-Added-a-deterministic-build-time-multipage-UTF-8-lor.patch
 
 %description
 CUPS is a standards-based, open-source printing system.
@@ -104,6 +137,7 @@ Library containing functions useful for developing printer drivers
 
 %prep
 %autosetup -p1
+sed -i -e 's,glibtoolize,slibtoolize,g' autogen.sh
 ./autogen.sh
 %configure
 
