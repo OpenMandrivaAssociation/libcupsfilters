@@ -1,3 +1,5 @@
+# Make sure the patches from upstream are applied with "git apply"
+# rather than traditional "patch" -- some contain binary patches
 %global __scm git
 
 %define major 2
@@ -29,6 +31,7 @@ BuildRequires: slibtool
 BuildRequires: make
 BuildRequires: gettext-devel
 BuildRequires: mupdf
+BuildRequires: git-core
 BuildRequires: (ghostscript or ghostpdl)
 Requires: (ghostscript or ghostpdl)
 Requires: mupdf
