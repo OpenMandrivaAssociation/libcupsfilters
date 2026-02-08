@@ -25,6 +25,7 @@ BuildRequires: pkgconfig(fontconfig)
 BuildRequires: pkgconfig(cups)
 BuildRequires: pkgconfig(libexif)
 BuildRequires: pkgconfig(pdfio)
+BuildRequires: pkgconfig(libjxl)
 BuildRequires: autoconf
 BuildRequires: automake
 BuildRequires: slibtool
