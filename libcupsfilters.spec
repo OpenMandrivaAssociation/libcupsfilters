@@ -27,6 +27,8 @@ BuildRequires: pkgconfig(libexif)
 BuildRequires: pkgconfig(pdfio)
 BuildRequires: pkgconfig(libjxl)
 BuildRequires: pkgconfig(poppler-cpp)
+# For pdftoppm
+BuildRequires: poppler
 BuildRequires: autoconf
 BuildRequires: automake
 BuildRequires: slibtool
