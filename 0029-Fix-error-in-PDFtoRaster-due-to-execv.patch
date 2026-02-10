@@ -7,10 +7,10 @@ Subject: [PATCH 29/33] Fix: error in PDFtoRaster due to execv
  cupsfilters/pdftoraster.c | 180 +++++++++++++++++++++++++-------------
  1 file changed, 118 insertions(+), 62 deletions(-)
 
-diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
 index c3bfe814..9fafb6bb 100644
---- a/cupsfilters/pdftoraster.c
-+++ b/cupsfilters/pdftoraster.c
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
 @@ -32,6 +32,7 @@
  #include <unistd.h>
  #include <sys/wait.h>

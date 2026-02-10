@@ -8,7 +8,7 @@
 
 Name: libcupsfilters
 Version: 2.1.1
-Release: 2
+Release: 3
 Source0: https://github.com/OpenPrinting/libcupsfilters/archive/%{version}/%{name}-%{version}.tar.gz
 Summary: Library containing functions useful for developing printer drivers
 URL: https://github.com/OpenPrinting/libcupsfilters
@@ -24,9 +24,9 @@ BuildRequires: pkgconfig(libjpeg)
 BuildRequires: pkgconfig(fontconfig)
 BuildRequires: pkgconfig(cups)
 BuildRequires: pkgconfig(libexif)
-BuildRequires: pkgconfig(pdfio)
 BuildRequires: pkgconfig(libjxl)
 BuildRequires: pkgconfig(poppler-cpp)
+BuildRequires: pkgconfig(libqpdf)
 # For pdftoppm
 BuildRequires: poppler
 BuildRequires: autoconf
@@ -56,24 +56,29 @@ Requires: mupdf
 0013-Add-JPEG-XL-Support-to-libcupsfilters-82.patch
 0014-configure.ac-Make-CJK-fonts-name-configurable.patch
 0015-cfFilterGhostscript-Introduce-cupsHalftoneType-dithe.patch
-0016-Replace-QPDF-by-PDFio-as-PDF-manipulation-library-in.patch
+# Causes crash on Ben's printer
+# 0016-Replace-QPDF-by-PDFio-as-PDF-manipulation-library-in.patch
 0017-image-jpeg-xl.c-Silenced-warnings-about-unused-varia.patch
 0018-Use-bin-sh-for-testfilters.sh-to-avoid-dependency-on.patch
-0019-Update-build-system-and-documentation-to-require-PDF.patch
+# Goes with 0016
+# 0019-Update-build-system-and-documentation-to-require-PDF.patch
 0020-cfFilterImageToPDF-Added-extra-debug-log-messages-co.patch
-0021-Fix-for-security-vulnerablity-due-to-use-of-system-f.patch
-0022-Fix-PCLm-strip-overflow-and-add-regression-test-105.patch
+# Touches file edited by 0016, needs porting
+# 0021-Fix-for-security-vulnerablity-due-to-use-of-system-f.patch
+# 0022-Fix-PCLm-strip-overflow-and-add-regression-test-105.patch
 0023-Merge-commit-from-fork.patch
 0024-Fix-out-of-bounds-write-in-cfFilterPDFToRaster.patch
 0025-image-tiff.c-Unify-return-values.patch
 0026-Potential-heap-buffer-overflow-fix-108.patch
 0027-Fix-cache-thrashing-for-large-images-106.patch
-0028-add-documentation-comments.patch
-0029-Fix-error-in-PDFtoRaster-due-to-execv.patch
-0030-fix-padding-issue-when-input-image-is-smaller-than-o.patch
-0031-change-the-log-line-to-show-x1-y1-x2-y2-from-x1-x2-y.patch
+# Depends on 0016
+# 0028-add-documentation-comments.patch
+#0029-Fix-error-in-PDFtoRaster-due-to-execv.patch
+#0030-fix-padding-issue-when-input-image-is-smaller-than-o.patch
+#0031-change-the-log-line-to-show-x1-y1-x2-y2-from-x1-x2-y.patch
 0032-texttopdf-default-to-UTF-8-when-charset-metadata-is-.patch
-0033-Added-a-deterministic-build-time-multipage-UTF-8-lor.patch
+# Needs disabled other patches
+#0033-Added-a-deterministic-build-time-multipage-UTF-8-lor.patch
 
 %description
 CUPS is a standards-based, open-source printing system.

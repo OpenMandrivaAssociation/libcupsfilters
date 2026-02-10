@@ -43,10 +43,10 @@ index 6c99693c..0c0daa80 100644
  
  #	testcmyk # fails as it opens some image.ppm which is nowerhe to be found.
  #	testimage # requires also some ppm file as argument
-diff --git a/cupsfilters/pwgtopdf.c b/cupsfilters/pwgtopdf.c
+diff --git a/cupsfilters/pwgtopdf.cxx b/cupsfilters/pwgtopdf.cxx
 index 3b54f1dc..16efb727 100644
---- a/cupsfilters/pwgtopdf.c
-+++ b/cupsfilters/pwgtopdf.c
+--- a/cupsfilters/pwgtopdf.cxx
++++ b/cupsfilters/pwgtopdf.cxx
 @@ -1199,57 +1199,61 @@ finish_page(struct pdf_info *info,
    }
  

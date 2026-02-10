@@ -8,10 +8,10 @@ Subject: [PATCH 30/33] fix padding issue(when input image is smaller than
  cupsfilters/pdftoraster.c | 27 +++++++++++++++++----------
  1 file changed, 17 insertions(+), 10 deletions(-)
 
-diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
 index 9fafb6bb..bddddf8f 100644
---- a/cupsfilters/pdftoraster.c
-+++ b/cupsfilters/pdftoraster.c
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
 @@ -1729,6 +1729,7 @@ write_page_image(cups_raster_t *raster,			// I - Cups raster output data struct
    unsigned char *dp;
    unsigned int image_rowsize = 0;

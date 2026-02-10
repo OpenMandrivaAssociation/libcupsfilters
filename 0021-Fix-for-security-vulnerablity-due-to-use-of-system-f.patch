@@ -73,10 +73,10 @@ index 48c291fa..9c074e16 100644
  # ================
  # Check for mutool
  # ================
-diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
 index 2b5e290f..fca1b486 100644
---- a/cupsfilters/pdftoraster.c
-+++ b/cupsfilters/pdftoraster.c
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
 @@ -29,6 +29,9 @@
  #include <cupsfilters/bitmap.h>
  #include <strings.h>

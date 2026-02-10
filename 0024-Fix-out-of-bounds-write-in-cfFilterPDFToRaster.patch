@@ -14,10 +14,10 @@ Fixes CVE-2025-64503
  cupsfilters/pdftoraster.c | 14 ++++++++++++++
  1 file changed, 14 insertions(+)
 
-diff --git a/cupsfilters/pdftoraster.c b/cupsfilters/pdftoraster.c
+diff --git a/cupsfilters/pdftoraster.cxx b/cupsfilters/pdftoraster.cxx
 index fca1b486..56616c27 100644
---- a/cupsfilters/pdftoraster.c
-+++ b/cupsfilters/pdftoraster.c
+--- a/cupsfilters/pdftoraster.cxx
++++ b/cupsfilters/pdftoraster.cxx
 @@ -1814,6 +1814,20 @@ out_page(pdftoraster_doc_t *doc,
      doc->header.cupsPageSize[0] = l;
    else
